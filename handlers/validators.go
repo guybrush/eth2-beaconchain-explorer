@@ -90,8 +90,7 @@ func Validators(w http.ResponseWriter, r *http.Request) {
 
 type ValidatorsDataQueryParams struct {
 	Search      string
-	OrderBy     string
-	OrderDir    string
+	Order       string
 	Draw        uint64
 	Start       uint64
 	Length      int64
@@ -135,7 +134,6 @@ func parseValidatorsDataQueryParams(r *http.Request) (*ValidatorsDataQueryParams
 		qryStateFilter = ""
 	}
 
-	orderColumn := q.Get("order[0][column]")
 	orderByMap := map[string]string{
 		"0": "pubkey",
 		"1": "validatorindex",
@@ -147,22 +145,33 @@ func parseValidatorsDataQueryParams(r *http.Request) (*ValidatorsDataQueryParams
 		"7": "lastattestationslot",
 		"8": "executedproposals",
 	}
-	orderBy, exists := orderByMap[orderColumn]
-	if !exists {
-		orderBy = "validatorindex"
-	}
 
-	orderDir := q.Get("order[0][dir]")
-	if orderDir != "desc" && orderDir != "asc" {
-		orderDir = "desc"
-	}
-
-	if orderBy == "lastattestationslot" {
-		if orderDir == "desc" {
-			orderDir = "desc nulls last"
-		} else {
-			orderDir = "asc nulls first"
+	orderBy := ""
+	for i := 0; i < len(orderByMap); i++ {
+		columnKey := q.Get(fmt.Sprintf("order[%v][column]", i))
+		column, exists := orderByMap[columnKey]
+		if !exists {
+			continue
 		}
+		orderDir := q.Get(fmt.Sprintf("order[%v][dir]", i))
+		if orderDir != "desc" && orderDir != "asc" {
+			orderDir = "desc"
+		}
+		if column == "lastattestationslot" {
+			if orderDir == "desc" {
+				orderDir = "desc nulls last"
+			} else {
+				orderDir = "asc nulls first"
+			}
+		}
+		if orderBy == "" {
+			orderBy = fmt.Sprintf("%v %v", column, orderDir)
+		} else {
+			orderBy = fmt.Sprintf("%v, %v %v", orderBy, column, orderDir)
+		}
+	}
+	if orderBy == "" {
+		orderBy = "validatorindex desc"
 	}
 
 	draw, err := strconv.ParseUint(q.Get("draw"), 10, 64)
@@ -192,7 +201,6 @@ func parseValidatorsDataQueryParams(r *http.Request) (*ValidatorsDataQueryParams
 	res := &ValidatorsDataQueryParams{
 		search,
 		orderBy,
-		orderDir,
 		draw,
 		start,
 		length,
@@ -271,8 +279,8 @@ func ValidatorsData(w http.ResponseWriter, r *http.Request) {
 		WHERE (encode(validators.pubkey::bytea, 'hex') LIKE $3
 			OR CAST(validators.validatorindex AS text) LIKE $3)
 		%s
-		ORDER BY %s %s
-		LIMIT $4 OFFSET $5`, dataQuery.StateFilter, dataQuery.OrderBy, dataQuery.OrderDir)
+		ORDER BY %s
+		LIMIT $4 OFFSET $5`, dataQuery.StateFilter, dataQuery.Order)
 
 	var validators []*types.ValidatorsPageDataValidators
 	err = db.DB.Select(&validators, qry, lastestEpoch, firstSlotOfPreviousEpoch, "%"+dataQuery.Search+"%", dataQuery.Length, dataQuery.Start)
