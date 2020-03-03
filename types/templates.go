@@ -133,8 +133,14 @@ type ValidatorPageData struct {
 	ActivationTs                     time.Time
 	ExitTs                           time.Time
 	Status                           string
-	ProposedBlocksCount              uint64
-	AttestationsCount                uint64
+	TotalProposedBlocksCount         uint64
+	ScheduledProposedBlocksCount     uint64
+	ExecutedProposedBlocksCount      uint64
+	MissedProposedBlocksCount        uint64
+	TotalAttestationsCount           uint64
+	ScheduledAttestationsCount       uint64
+	AttestedAttestationsCount        uint64
+	MissedAttestationsCount          uint64
 	StatusProposedCount              uint64
 	StatusMissedCount                uint64
 	Income1d                         int64

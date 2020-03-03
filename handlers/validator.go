@@ -403,24 +403,88 @@ func ValidatorAttestations(w http.ResponseWriter, r *http.Request) {
 		length = 100
 	}
 
-	var totalCount uint64
+	// support multi-sort
+	orderByMap := map[string]string{
+		"2": "status",
+		"3": "attesterslot",
+	}
+	orderBy := ""
+	for i := 0; i < len(orderByMap); i++ {
+		columnKey := q.Get(fmt.Sprintf("order[%v][column]", i))
+		column, exists := orderByMap[columnKey]
+		if !exists {
+			continue
+		}
+		orderDir := q.Get(fmt.Sprintf("order[%v][dir]", i))
+		if orderDir != "desc" && orderDir != "asc" {
+			orderDir = "desc"
+		}
+		if orderBy == "" {
+			orderBy = fmt.Sprintf("%v %v", column, orderDir)
+		} else {
+			orderBy = fmt.Sprintf("%v, %v %v", orderBy, column, orderDir)
+		}
+	}
+	if orderBy == "" {
+		orderBy = "attesterslot desc"
+	}
 
-	err = db.DB.Get(&totalCount, "SELECT LEAST(COUNT(*), 10000) FROM attestation_assignments WHERE validatorindex = $1", index)
+	missedStatusSlot := utils.TimeToSlot(uint64(time.Now().Add(time.Minute * -1).Unix()))
+
+	type countsType struct {
+		Count       uint64
+		Fixedstatus uint64
+	}
+	counts := []*countsType{}
+	err = db.DB.Select(&counts, `
+		SELECT 
+			count(*), 
+			CASE
+				WHEN status = 1 THEN 1
+				WHEN status = 2 THEN 2
+				WHEN status = 0 AND attesterslot < $2 THEN 2
+				ELSE 0
+			END AS fixedstatus
+		FROM attestation_assignments
+		WHERE validatorindex = $1
+		GROUP BY fixedstatus`, index, missedStatusSlot)
 	if err != nil {
-		logger.Errorf("error retrieving proposed blocks count: %v", err)
+		logger.Errorf("error retrieving attestation counts: %v", err)
 		http.Error(w, "Internal server error", 503)
 		return
 	}
+	var totalCount uint64
+	var scheduledCount uint64
+	var attestedCount uint64
+	var missedCount uint64
+	for _, c := range counts {
+		totalCount += c.Count
+		switch c.Fixedstatus {
+		case 2:
+			missedCount += c.Count
+		case 1:
+			attestedCount += c.Count
+		default:
+			scheduledCount += c.Count
+		}
+	}
 
 	var blocks []*types.ValidatorAttestation
-	err = db.DB.Select(&blocks, `SELECT attestation_assignments.epoch, 
-											    attestation_assignments.attesterslot,  
-											    attestation_assignments.committeeindex,  
-											    attestation_assignments.status
-										FROM attestation_assignments 
-										WHERE validatorindex = $1
-										ORDER BY epoch desc, attesterslot DESC
-										LIMIT $2 OFFSET $3`, index, length, start)
+	err = db.DB.Select(&blocks, fmt.Sprintf(`
+		SELECT 
+			epoch,
+			attesterslot,
+			committeeindex,
+			CASE
+				WHEN status = 1 THEN 1
+				WHEN status = 2 THEN 2
+				WHEN status = 0 AND attesterslot < $4 THEN 2
+				ELSE 0
+			END AS status
+		FROM attestation_assignments 
+		WHERE validatorindex = $1
+		ORDER BY %s
+		LIMIT $2 OFFSET $3`, orderBy), index, length, start, missedStatusSlot)
 
 	if err != nil {
 		logger.Errorf("error retrieving validator attestations data: %v", err)
@@ -430,10 +494,6 @@ func ValidatorAttestations(w http.ResponseWriter, r *http.Request) {
 
 	tableData := make([][]interface{}, len(blocks))
 	for i, b := range blocks {
-
-		if utils.SlotToTime(b.AttesterSlot).Before(time.Now().Add(time.Minute*-1)) && b.Status == 0 {
-			b.Status = 2
-		}
 		tableData[i] = []interface{}{
 			fmt.Sprintf("%v", b.Epoch),
 			fmt.Sprintf("%v", b.AttesterSlot),
