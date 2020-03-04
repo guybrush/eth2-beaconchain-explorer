@@ -26,14 +26,16 @@ var Config *types.Config
 // GetTemplateFuncs will get the template functions
 func GetTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"formatBlockStatus": FormatBlockStatus,
-		"formatValidator":   FormatValidator,
-		"formatBalance":     FormatBalance,
-		"formatPercentage":  FormatPercentage,
-		"formatIncome":      FormatIncome,
-		"mod":               func(i, j int) bool { return i%j == 0 },
-		"sub":               func(i, j int) int { return i - j },
-		"add":               func(i, j int) int { return i + j },
+		"formatBlockStatus":             FormatBlockStatus,
+		"formatValidator":               FormatValidator,
+		"formatBalance":                 FormatBalance,
+		"formatBalanceDigits":           FormatBalanceDigits,
+		"formatPercentage":              FormatPercentage,
+		"formatPercentageColoredDigits": FormatPercentageColoredDigits,
+		"formatIncome":                  FormatIncome,
+		"mod":                           func(i, j int) bool { return i%j == 0 },
+		"sub":                           func(i, j int) int { return i - j },
+		"add":                           func(i, j int) int { return i + j },
 	}
 }
 
@@ -113,7 +115,12 @@ func TimeToEpoch(ts time.Time) int64 {
 
 // FormatBalance will return a string for a balance
 func FormatBalance(balance uint64) string {
-	return fmt.Sprintf("%.2f ETH", float64(balance)/float64(1000000000))
+	return fmt.Sprintf("%.2f ETH", float64(balance)/float64(1e9))
+}
+
+// FormatBalanceDigits will return a string for a balance with specific amount of digits after comma
+func FormatBalanceDigits(balance uint64, digits int64) string {
+	return fmt.Sprintf(fmt.Sprintf("%%.%df ETH", digits), float64(balance)/float64(1e9))
 }
 
 // FormatIncome will return a string for a balance
@@ -130,6 +137,19 @@ func FormatIncome(income int64) template.HTML {
 // FormatPercentage will return a string for a percentage
 func FormatPercentage(percentage float64) string {
 	return fmt.Sprintf("%.0f", percentage*float64(100))
+}
+
+// FormatPercentageDigits will return a string for a percentage with passed digits after comma
+func FormatPercentageDigits(percentage float64, digits int) string {
+	return fmt.Sprintf(fmt.Sprintf("%%.%df%%%%", digits), percentage*float64(100))
+}
+
+// FormatPercentageColoredDigits will return a string for a percentage with passed digits after comma and colored according to percentage
+func FormatPercentageColoredDigits(percentage float64, digits int) template.HTML {
+	str := FormatPercentageDigits(percentage, digits)
+	green := 10 + uint8(200*percentage)
+	red := 10 + 200 - green
+	return template.HTML(fmt.Sprintf(`<span style="color: rgb(%d,%d,10)">%s</span>`, red, green, str))
 }
 
 // WaitForCtrlC will block/wait until a control-c is pressed
@@ -191,4 +211,14 @@ func MustParseHex(hexString string) []byte {
 func IsApiRequest(r *http.Request) bool {
 	query, ok := r.URL.Query()["format"]
 	return ok && len(query) > 0 && query[0] == "json"
+}
+
+func CalculateSuccessRate(success, fail uint64) float64 {
+	if success == 0 && fail == 0 {
+		return 1.0
+	}
+	if success == 0 {
+		return 0.0
+	}
+	return float64(success) / float64(success+fail)
 }

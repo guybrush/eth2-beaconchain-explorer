@@ -90,7 +90,7 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 										WHERE validators.validatorindex = $2
 										LIMIT 1`, services.LatestEpoch(), index)
 	if err != nil {
-		logger.Printf("Error retrieving validator page data: %v", err)
+		logger.Errorf("error retrieving validator page data: %v", err)
 
 		err := validatorNotFoundTemplate.ExecuteTemplate(w, "layout", data)
 
@@ -102,11 +102,14 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	validatorPageData.ChainGenesisTimestamp = utils.Config.Chain.GenesisTimestamp
+	validatorPageData.ChainSecondsPerSlot = utils.Config.Chain.SecondsPerSlot
+	validatorPageData.ChainSlotsPerEpoch = utils.Config.Chain.SlotsPerEpoch
 	validatorPageData.Epoch = services.LatestEpoch()
 	validatorPageData.Index = index
 	validatorPageData.PublicKey, err = db.GetValidatorPublicKey(index)
 	if err != nil {
-		logger.Printf("Error retrieving validator public key %v: %v", index, err)
+		logger.Errorf("error retrieving validator public key %v: %v", index, err)
 
 		err := validatorNotFoundTemplate.ExecuteTemplate(w, "layout", data)
 
@@ -163,19 +166,228 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err = db.DB.Get(&validatorPageData.ProposedBlocksCount, "SELECT COUNT(*) FROM blocks WHERE proposer = $1", index)
+	cutoff1d := time.Now().Add(time.Hour * 24 * -1)
+	cutoff7d := time.Now().Add(time.Hour * 24 * 7 * -1)
+	cutoff31d := time.Now().Add(time.Hour * 24 * 31 * -1)
+	cutoff1dSlot := utils.TimeToSlot(uint64(cutoff1d.Unix()))
+	cutoff7dSlot := utils.TimeToSlot(uint64(cutoff7d.Unix()))
+	cutoff31dSlot := utils.TimeToSlot(uint64(cutoff31d.Unix()))
+	missedStatusSlot := utils.TimeToSlot(uint64(time.Now().Add(time.Minute * -1).Unix()))
+
+	proposedBlocks := []struct {
+		Slot   uint64
+		Status uint64
+	}{}
+	err = db.DB.Select(&proposedBlocks, `
+		SELECT slot, status
+		FROM blocks
+		WHERE proposer = $1`, index)
+	if err != nil {
+		logger.Errorf("error retrieving proposed blocks: %v", err)
+		http.Error(w, "Internal server error", 503)
+		return
+	}
+	validatorPageData.ProposedBlocks = proposedBlocks
+
+	proposedBlocksCount := []struct {
+		Count  uint64
+		Status uint64
+		Cutoff uint64
+	}{}
+	err = db.DB.Select(&proposedBlocksCount, `
+		SELECT
+			COUNT(*),
+			status,
+			CASE
+				WHEN slot > $2 THEN 1
+				WHEN slot > $3 THEN 7
+				WHEN slot > $4 THEN 31
+				ELSE 0
+			END AS cutoff
+		FROM blocks
+		WHERE proposer = $1
+		GROUP BY status, cutoff`,
+		index,
+		cutoff1dSlot,
+		cutoff7dSlot,
+		cutoff31dSlot)
 	if err != nil {
 		logger.Errorf("error retrieving proposed blocks count: %v", err)
 		http.Error(w, "Internal server error", 503)
 		return
 	}
 
-	err = db.DB.Get(&validatorPageData.AttestationsCount, "SELECT LEAST(COUNT(*), 10000) FROM attestation_assignments WHERE validatorindex = $1", index)
+	// var orphanedProposedBlocksCount1d uint64
+	// var orphanedProposedBlocksCount7d uint64
+	// var orphanedProposedBlocksCount31d uint64
+	var missedProposedBlocksCount1d uint64
+	var missedProposedBlocksCount7d uint64
+	var missedProposedBlocksCount31d uint64
+	var executedProposedBlocksCount1d uint64
+	var executedProposedBlocksCount7d uint64
+	var executedProposedBlocksCount31d uint64
+	for _, c := range proposedBlocksCount {
+		validatorPageData.TotalProposedBlocksCount += c.Count
+		switch c.Status {
+		case 3:
+			switch c.Cutoff {
+			// case 1:
+			// 	orphanedProposedBlocksCount1d = c.Count
+			// 	fallthrough
+			// case 7:
+			// 	orphanedProposedBlocksCount7d = c.Count
+			// 	fallthrough
+			// case 31:
+			// 	orphanedProposedBlocksCount31d = c.Count
+			// 	fallthrough
+			default:
+				validatorPageData.OrphanedProposedBlocksCount += c.Count
+			}
+		case 2:
+			switch c.Cutoff {
+			case 1:
+				missedProposedBlocksCount1d += c.Count
+				fallthrough
+			case 7:
+				missedProposedBlocksCount7d += c.Count
+				fallthrough
+			case 31:
+				missedProposedBlocksCount31d += c.Count
+				fallthrough
+			default:
+				validatorPageData.MissedProposedBlocksCount += c.Count
+			}
+		case 1:
+			switch c.Cutoff {
+			case 1:
+				executedProposedBlocksCount1d += c.Count
+				fallthrough
+			case 7:
+				executedProposedBlocksCount7d += c.Count
+				fallthrough
+			case 31:
+				executedProposedBlocksCount31d += c.Count
+				fallthrough
+			default:
+				validatorPageData.ExecutedProposedBlocksCount += c.Count
+			}
+		case 0:
+			validatorPageData.ScheduledProposedBlocksCount += c.Count
+		default:
+			logger.Errorf("error retrieving proposed blocks count: unknown status: %v", c.Status)
+		}
+	}
+
+	validatorPageData.ProposedBlocksEffectivenessTotal = utils.CalculateSuccessRate(validatorPageData.ExecutedProposedBlocksCount, validatorPageData.MissedProposedBlocksCount)
+	validatorPageData.ProposedBlocksEffectiveness31d = utils.CalculateSuccessRate(executedProposedBlocksCount31d, missedProposedBlocksCount31d)
+	validatorPageData.ProposedBlocksEffectiveness7d = utils.CalculateSuccessRate(executedProposedBlocksCount7d, missedProposedBlocksCount7d)
+	validatorPageData.ProposedBlocksEffectiveness1d = utils.CalculateSuccessRate(executedProposedBlocksCount1d, missedProposedBlocksCount1d)
+
+	missedAttestations := []uint64{}
+	err = db.DB.Select(&missedAttestations, `
+		SELECT attesterslot*$3+$4
+		FROM attestation_assignments
+		WHERE validatorindex = $1 AND ( status = 2 OR ( status = 0 AND attesterslot < $2 ) )`,
+		index,
+		missedStatusSlot,
+		utils.Config.Chain.SecondsPerSlot,
+		utils.Config.Chain.GenesisTimestamp)
+	if err != nil {
+		logger.Errorf("error retrieving missed attestations: %w", err)
+		http.Error(w, "Internal server error", 503)
+		return
+	}
+	validatorPageData.MissedAttestations = missedAttestations
+
+	attestationCounts := []struct {
+		Count       uint64
+		Fixedstatus uint64
+		Cutoff      uint64
+	}{}
+	err = db.DB.Select(&attestationCounts, `
+		SELECT
+			COUNT(*),
+			CASE
+				WHEN status = 1 THEN 1
+				WHEN status = 2 THEN 2
+				WHEN status = 0 AND attesterslot < $2 THEN 2
+				ELSE 0
+			END AS fixedstatus,
+			CASE
+				WHEN attesterslot > $3 THEN 1
+				WHEN attesterslot > $4 THEN 7
+				WHEN attesterslot > $5 THEN 31
+				ELSE 0
+			END AS cutoff
+		FROM attestation_assignments
+		WHERE validatorindex = $1
+		GROUP BY fixedstatus, cutoff`,
+		index,
+		missedStatusSlot,
+		cutoff1dSlot,
+		cutoff7dSlot,
+		cutoff31dSlot)
 	if err != nil {
 		logger.Errorf("error retrieving attestation count: %v", err)
 		http.Error(w, "Internal server error", 503)
 		return
 	}
+
+	var missedAttestationsCount1d uint64
+	var missedAttestationsCount7d uint64
+	var missedAttestationsCount31d uint64
+	var attestedAttestationsCount1d uint64
+	var attestedAttestationsCount7d uint64
+	var attestedAttestationsCount31d uint64
+	for _, c := range attestationCounts {
+		validatorPageData.TotalAttestationsCount += c.Count
+		switch c.Fixedstatus {
+		case 2:
+			switch c.Cutoff {
+			case 1:
+				missedAttestationsCount1d += c.Count
+				fallthrough
+			case 7:
+				missedAttestationsCount7d += c.Count
+				fallthrough
+			case 31:
+				missedAttestationsCount31d += c.Count
+				fallthrough
+			default:
+				validatorPageData.MissedAttestationsCount += c.Count
+			}
+		case 1:
+			switch c.Cutoff {
+			case 1:
+				attestedAttestationsCount1d += c.Count
+				fallthrough
+			case 7:
+				attestedAttestationsCount7d += c.Count
+				fallthrough
+			case 31:
+				attestedAttestationsCount31d += c.Count
+				fallthrough
+			default:
+				validatorPageData.AttestedAttestationsCount += c.Count
+			}
+		case 0:
+			validatorPageData.ScheduledAttestationsCount += c.Count
+		default:
+			logger.Errorf("error retrieving attestation count: unknown status: %v", c.Fixedstatus)
+		}
+	}
+
+	// fmt.Printf("============ error attestations: 1d: %v, 7d: %v, 31d: %v, total: %v, %+v\n",
+	// 	missedAttestationsCount1d,
+	// 	missedAttestationsCount7d,
+	// 	missedAttestationsCount31d,
+	// 	validatorPageData.MissedAttestationsCount,
+	// 	attestationCounts)
+
+	validatorPageData.AttestationsEffectivenessTotal = utils.CalculateSuccessRate(validatorPageData.AttestedAttestationsCount, validatorPageData.MissedAttestationsCount)
+	validatorPageData.AttestationsEffectiveness31d = utils.CalculateSuccessRate(attestedAttestationsCount31d, missedAttestationsCount31d)
+	validatorPageData.AttestationsEffectiveness7d = utils.CalculateSuccessRate(attestedAttestationsCount7d, missedAttestationsCount7d)
+	validatorPageData.AttestationsEffectiveness1d = utils.CalculateSuccessRate(attestedAttestationsCount1d, missedAttestationsCount1d)
 
 	var balanceHistory []*types.ValidatorBalanceHistory
 	err = db.DB.Select(&balanceHistory, "SELECT epoch, balance FROM validator_balances WHERE validatorindex = $1 ORDER BY epoch", index)
@@ -186,9 +398,6 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 	}
 
 	validatorPageData.BalanceHistoryChartData = make([][]float64, len(balanceHistory))
-	cutoff1d := time.Now().Add(time.Hour * 24 * -1)
-	cutoff7d := time.Now().Add(time.Hour * 24 * 7 * -1)
-	cutoff31d := time.Now().Add(time.Hour * 24 * 31 * -1)
 
 	for i, balance := range balanceHistory {
 		balanceTs := utils.EpochToTime(balance.Epoch)
@@ -213,6 +422,8 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 	if validatorPageData.Income31d == 0 {
 		validatorPageData.Income31d = int64(validatorPageData.CurrentBalance) - int64(balanceHistory[0].Balance)
 	}
+
+	validatorPageData.IncomeTotal = int64(validatorPageData.CurrentBalance) - int64(balanceHistory[0].Balance)
 
 	var effectiveBalanceHistory []*types.ValidatorBalanceHistory
 	err = db.DB.Select(&effectiveBalanceHistory, "SELECT epoch, COALESCE(effectivebalance, 0) as balance FROM validator_balances WHERE validatorindex = $1 ORDER BY epoch", index)
@@ -266,7 +477,6 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", 503)
 		return
 	}
-
 }
 
 // ValidatorProposedBlocks returns a validator's proposed blocks in json
@@ -437,8 +647,8 @@ func ValidatorAttestations(w http.ResponseWriter, r *http.Request) {
 	}
 	counts := []*countsType{}
 	err = db.DB.Select(&counts, `
-		SELECT 
-			count(*), 
+		SELECT
+			COUNT(*),
 			CASE
 				WHEN status = 1 THEN 1
 				WHEN status = 2 THEN 2
@@ -471,7 +681,7 @@ func ValidatorAttestations(w http.ResponseWriter, r *http.Request) {
 
 	var blocks []*types.ValidatorAttestation
 	err = db.DB.Select(&blocks, fmt.Sprintf(`
-		SELECT 
+		SELECT
 			epoch,
 			attesterslot,
 			committeeindex,
@@ -481,7 +691,7 @@ func ValidatorAttestations(w http.ResponseWriter, r *http.Request) {
 				WHEN status = 0 AND attesterslot < $4 THEN 2
 				ELSE 0
 			END AS status
-		FROM attestation_assignments 
+		FROM attestation_assignments
 		WHERE validatorindex = $1
 		ORDER BY %s
 		LIMIT $2 OFFSET $3`, orderBy), index, length, start, missedStatusSlot)

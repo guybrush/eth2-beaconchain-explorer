@@ -116,6 +116,9 @@ type ValidatorsPageDataValidators struct {
 
 // ValidatorPageData is a struct to hold data for the validators page
 type ValidatorPageData struct {
+	ChainGenesisTimestamp            uint64
+	ChainSecondsPerSlot              uint64
+	ChainSlotsPerEpoch               uint64
 	Epoch                            uint64 `db:"epoch"`
 	ValidatorIndex                   uint64 `db:"validatorindex"`
 	PublicKey                        []byte
@@ -133,10 +136,19 @@ type ValidatorPageData struct {
 	ActivationTs                     time.Time
 	ExitTs                           time.Time
 	Status                           string
+	ProposedBlocksEffectivenessTotal float64
+	ProposedBlocksEffectiveness31d   float64
+	ProposedBlocksEffectiveness7d    float64
+	ProposedBlocksEffectiveness1d    float64
 	TotalProposedBlocksCount         uint64
 	ScheduledProposedBlocksCount     uint64
 	ExecutedProposedBlocksCount      uint64
 	MissedProposedBlocksCount        uint64
+	OrphanedProposedBlocksCount      uint64
+	AttestationsEffectivenessTotal   float64
+	AttestationsEffectiveness31d     float64
+	AttestationsEffectiveness7d      float64
+	AttestationsEffectiveness1d      float64
 	TotalAttestationsCount           uint64
 	ScheduledAttestationsCount       uint64
 	AttestedAttestationsCount        uint64
@@ -146,9 +158,15 @@ type ValidatorPageData struct {
 	Income1d                         int64
 	Income7d                         int64
 	Income31d                        int64
+	IncomeTotal                      int64
 	DailyProposalCount               []DailyProposalCount
 	BalanceHistoryChartData          [][]float64
 	EffectiveBalanceHistoryChartData [][]float64
+	MissedAttestations               []uint64
+	ProposedBlocks                   []struct {
+		Slot   uint64
+		Status uint64
+	}
 }
 
 // DailyProposalCount is a struct for the daily proposal count data

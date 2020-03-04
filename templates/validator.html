@@ -82,6 +82,52 @@
 	<script src="/js/highcharts-global-options.js"></script>
 
 	<script>
+		function slotToTime(slot) {
+			var gts = {{.ChainGenesisTimestamp}}
+			var sps = {{.ChainSecondsPerSlot}}
+			return (gts+slot*sps)*1000
+		}
+		function timeToSlotAndEpoch(ts) {
+			var gts = {{.ChainGenesisTimestamp}}
+			var sps = {{.ChainSecondsPerSlot}}
+			var spe = {{.ChainSlotsPerEpoch}}
+			var slot = Math.floor((ts/1000 - gts) / sps)
+			var epoch = Math.floor(slot/spe)
+			return {slot:slot,epoch:epoch}
+		}
+		
+		var missedAttestations = {{.MissedAttestations}}
+		var plotLines = []
+		for (var i=0; i<missedAttestations.length; i++) {
+			plotLines.push({
+				color: 'rgba(255,0,0,0.2)',
+				className: 'chart-plotLine-missedAttestation',
+				width: 1,
+				value: missedAttestations[i]*1000
+			})
+		}
+
+		var proposedBlocks = {{.ProposedBlocks}}
+		var proposedBlocksColorsByStatus = {
+			1: 'green',// '#7cb5ec',
+			2: '#ff835c',
+			3: 'gray',
+			0: 'white'
+		}
+		var proposedBlocksClassesByStatus = {
+			1: 'chart-plotLine-proposedBlocksExecuted',// '#7cb5ec',
+			2: 'chart-plotLine-proposedBlocksMissed',
+			3: 'chart-plotLine-proposedBlocksOrphaned',
+			0: 'chart-plotLine-proposedBlocksScheduled'
+		}
+		for (var i=0; i<proposedBlocks.length; i++) {
+			plotLines.push({
+				color: proposedBlocksColorsByStatus[proposedBlocks[i].Status],
+				className: proposedBlocksClassesByStatus[proposedBlocks[i].Status],
+				width: 1,
+				value: slotToTime(proposedBlocks[i].Slot),
+			})
+		}
 		Highcharts.stockChart('balancechart', {
 			colors: ["#7cb5ec", "#90ed7d", "#f7a35c", "#8085e9", "#f15c80", "#e4d354", "#2b908f", "#f45b5b", "#91e8e1"],
 			rangeSelector: {
@@ -96,9 +142,39 @@
 			legend: {
 					enabled: true
 			},
+			tooltip: {
+				formatter: function(tooltip) {
+					var orig = tooltip.defaultFormatter.call(this, tooltip)
+					var epoch = timeToSlotAndEpoch(this.x).epoch
+					orig[0] = `${orig[0]}<span style="font-size:10px">Epoch ${epoch}</span>`
+					return orig
+				}
+			},
 			xAxis: {
 				type: 'datetime',
-				range: 7 * 24 * 60 * 60 * 1000
+				labels: {
+					formatter: function(){
+						// console.log(this,this.axis.defaultLabelFormatter.call(this))
+						var se = timeToSlotAndEpoch(this.value)
+						var orig = this.axis.defaultLabelFormatter.call(this)
+						return orig + '<br/>Epoch '+se.epoch
+					}
+				},
+				// crosshair: {
+				// 	label: {
+				// 		formatter: function() {
+				// 			return "bla"
+				// 		}
+				// 	}
+				// },
+				range: 7 * 24 * 60 * 60 * 1000,
+				// plotLines: [{
+				// 		// color: '#FF0000',
+				// 		color: 'var(--danger)',
+				// 		width: 1,
+				// 		value: Date.now()-3600000,
+				// 	}],
+				plotLines: plotLines,
 			},
 			yAxis: [{
 				title: {
@@ -113,6 +189,58 @@
 				name: "Effective Balance",
 				step: true,
 				data: {{.EffectiveBalanceHistoryChartData}}
+			}, {
+				name: "Missed Attestations",
+				color: "#f00",
+				dashStyle: "solid",
+				marker: {enabled:false},
+				events: {
+					legendItemClick: function(e) {
+						if (this.visible) 
+							$(this.chart.container).find('.chart-plotLine-missedAttestation').hide()
+						else
+							$(this.chart.container).find('.chart-plotLine-missedAttestation').show()
+					}
+				}
+			}, {
+				name: "Executed Block Proposals",
+				color: "green",
+				dashStyle: "solid",
+				marker: {enabled:false},
+				events: {
+					legendItemClick: function(e) {
+						if (this.visible) 
+							$(this.chart.container).find('.chart-plotLine-proposedBlocksExecuted').hide()
+						else
+							$(this.chart.container).find('.chart-plotLine-proposedBlocksExecuted').show()
+					}
+				}
+			}, {
+				name: "Missed Block Proposals",
+				color: "#ff835c",
+				dashStyle: "solid",
+				marker: {enabled:false},
+				events: {
+					legendItemClick: function(e) {
+						if (this.visible) 
+							$(this.chart.container).find('.chart-plotLine-proposedBlocksMissed').hide()
+						else
+							$(this.chart.container).find('.chart-plotLine-proposedBlocksMissed').show()
+					}
+				}
+			}, {
+				name: "Orphaned Block Proposals",
+				color: "gray",
+				dashStyle: "solid",
+				marker: {enabled:false},
+				events: {
+					legendItemClick: function(e) {
+						if (this.visible) 
+							$(this.chart.container).find('.chart-plotLine-proposedBlocksOrphaned').hide()
+						else
+							$(this.chart.container).find('.chart-plotLine-proposedBlocksOrphaned').show()
+					}
+				}
 			}]
 		});
 	</script>
@@ -135,7 +263,7 @@
 				xAxis: {
 					lineWidth: 0,
 					tickColor: '#e5e1e1',
-					range: 7 * 24 * 3600 * 1000
+					range: 7 * 24 * 3600 * 1000,
 				},
 				legend: {
 					enabled: true
@@ -334,14 +462,29 @@
 						</li>
 						<li class="nav-item">
 							<a class="nav-link" id="pills-blocks-tab" data-toggle="pill" href="#pills-blocks" role="tab"
-							   aria-controls="pills-blocks" aria-selected="false">Proposed Blocks <span
-										class="badge bg-secondary text-white">{{.ProposedBlocksCount}}</span></a>
+							   aria-controls="pills-blocks" aria-selected="false">Proposed Blocks 
+								<span class="badge bg-secondary text-white"
+									title="Scheduled / Executed / Missed / Orphaned"
+									data-toggle="tooltip">
+									<span style="color:gray;">{{.ScheduledProposedBlocksCount}}</span> /
+									<span style="color:#7cb5ec;">{{.ExecutedProposedBlocksCount}}</span> /
+									<span style="color:#ff835c;">{{.MissedProposedBlocksCount}}</span> /
+									<span style="color:#e4a354;">{{.OrphanedProposedBlocksCount}}</span>
+								</span>
+							</a>
 						</li>
 						<li class="nav-item">
 							<a class="nav-link" id="pills-attestations-tab" data-toggle="pill"
 							   href="#pills-attestations"
-							   role="tab" aria-controls="pills-attestations" aria-selected="false">Attestations <span
-										class="badge bg-secondary text-white">{{.AttestationsCount}}</span></a>
+							   role="tab" aria-controls="pills-attestations" aria-selected="false">Attestations 
+								<span class="badge bg-secondary text-white"
+									title="Scheduled / Attested / Missed"
+									data-toggle="tooltip">
+									<span style="color:gray;">{{.ScheduledAttestationsCount}}</span> /
+									<span style="color:#7cb5ec;">{{.AttestedAttestationsCount}}</span> /
+									<span style="color:#ff835c;">{{.MissedAttestationsCount}}</span>
+								</span>
+							</a>
 						</li>
 						{{/*
 		<li class="nav-item"
@@ -368,17 +511,26 @@
 					</div>
 					<div class="row border-bottom p-3">
 						<div class="col-md-2">Current Balance:</div>
-						<div class="col-md-10">{{.CurrentBalance | formatBalance}}</div>
+						<div class="col-md-10">{{formatBalanceDigits .CurrentBalance 8}}</div>
 					</div>
 					<div class="row border-bottom p-3">
 						<div class="col-md-2">Effective Balance:</div>
-						<div class="col-md-10">{{.EffectiveBalance | formatBalance}}</div>
+						<div class="col-md-10">{{formatBalanceDigits .EffectiveBalance 1}}</div>
 					</div>
+					<!--
 					<div class="row border-bottom p-3">
 						<div class="col-md-2">Income:</div>
 						<div class="col-md-10">1 day: {{.Income1d | formatIncome}} | 7 days: {{.Income7d | formatIncome}} | 31 days: {{.Income31d | formatIncome}}</div>
 					</div>
-
+					<div class="row border-bottom p-3">
+						<div class="col-md-2">Attestation Effectiveness:</div>
+						<div class="col-md-10">{{printf "%.2f" .AttestationsEffectivenessTotal}}%</div>
+					</div>
+					<div class="row border-bottom p-3">
+						<div class="col-md-2">Block Proposal Effectiveness:</div>
+						<div class="col-md-10">{{printf "%.2f" .ProposedBlocksEffectivenessTotal}}%</div>
+					</div>
+					-->
 					<div class="row border-bottom p-3">
 						<div class="col-md-2">Status:</div>
 						{{if eq .Status "ActiveOffline"}}
@@ -393,10 +545,12 @@
 							<div class="col-md-10"><b>{{.Status}}</b></div>
 						{{end}}
 					</div>
+					<!--
 					<div class="row border-bottom p-3">
 						<div class="col-md-2">Slashed:</div>
 						<div class="col-md-10">{{.Slashed}}</div>
 					</div>
+					-->
 					<div class="row border-bottom p-3">
 						<div class="col-md-2">Eligible for Activation:</div>
 						<div class="col-md-10"><span
@@ -439,6 +593,45 @@
 							</div>
 						</div>
 					{{end}}
+					<div class="row border-bottom p-3">
+						<div class="col-md-2">Performance:</div>
+						<div class="col-md-10">
+							<table class="table">
+								<thead>
+									<tr>
+										<th scope="col"></th>
+										<th scope="col">1 day</th>
+										<th scope="col">7 days</th>
+										<th scope="col">31 days</th>
+										<th scope="col">total</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr>
+										<th scope="row">Income</td>
+										<td>{{.Income1d | formatIncome}}</td>
+										<td>{{.Income7d | formatIncome}}</td>
+										<td>{{.Income31d | formatIncome}}</td>
+										<td>{{.IncomeTotal | formatIncome}}</td>
+									</tr>
+									<tr>
+										<th scope="row">Attestation Effectiveness</td>
+										<td>{{formatPercentageColoredDigits .AttestationsEffectiveness1d 2}}</td>
+										<td>{{formatPercentageColoredDigits .AttestationsEffectiveness7d 2}}</td>
+										<td>{{formatPercentageColoredDigits .AttestationsEffectiveness31d 2}}</td>
+										<td>{{formatPercentageColoredDigits .AttestationsEffectivenessTotal 2}}</td>
+									</tr>
+									<tr>
+										<th scope="row">Block Proposal Effectiveness</td>
+										<td>{{formatPercentageColoredDigits .ProposedBlocksEffectiveness1d 2}}</td>
+										<td>{{formatPercentageColoredDigits .ProposedBlocksEffectiveness7d 2}}</td>
+										<td>{{formatPercentageColoredDigits .ProposedBlocksEffectiveness31d 2}}</td>
+										<td>{{formatPercentageColoredDigits .ProposedBlocksEffectivenessTotal 2}}</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+					</div>
 					<div class="row border-bottom p-3">
 						<div class="col-md-12">
 							<div id="balancechart" height="200px"></div>
