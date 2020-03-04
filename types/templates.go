@@ -167,6 +167,7 @@ type ValidatorPageData struct {
 		Slot   uint64
 		Status uint64
 	}
+	ZeroVotedEpochs []uint64
 }
 
 // DailyProposalCount is a struct for the daily proposal count data

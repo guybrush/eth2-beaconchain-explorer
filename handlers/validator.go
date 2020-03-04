@@ -435,7 +435,8 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 
 	validatorPageData.EffectiveBalanceHistoryChartData = make([][]float64, len(effectiveBalanceHistory))
 	for i, balance := range effectiveBalanceHistory {
-		validatorPageData.EffectiveBalanceHistoryChartData[i] = []float64{float64(utils.EpochToTime(balance.Epoch).Unix() * 1000), float64(balance.Balance) / 1000000000}
+		// validatorPageData.EffectiveBalanceHistoryChartData[i] = []float64{float64(utils.EpochToTime(balance.Epoch).Unix() * 1000), float64(balance.Balance) / 1000000000}
+		validatorPageData.EffectiveBalanceHistoryChartData[i] = []float64{float64(utils.EpochToTime(balance.Epoch).Unix() * 1000), float64(balance.Balance)}
 	}
 
 	var firstSlotOfPreviousEpoch uint64
@@ -462,6 +463,14 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 			validatorPageData.Status = "Active"
 		}
 	}
+
+	// err = db.DB.Select(&validatorPageData.ZeroVotedEpochs, "SELECT epoch FROM epochs WHERE votedether = 0")
+	// if err != nil {
+	// 	logger.Errorf("error retrieving zero voted ether epochs: %v", err)
+	// 	http.Error(w, "Internal server error", 503)
+	// 	return
+	// }
+
 	data.Data = validatorPageData
 
 	if utils.IsApiRequest(r) {
