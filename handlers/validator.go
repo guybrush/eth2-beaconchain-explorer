@@ -23,6 +23,9 @@ var validatorNotFoundTemplate = template.Must(template.New("validatornotfound").
 
 // Validator returns validator data using a go template
 func Validator(w http.ResponseWriter, r *http.Request) {
+	// #TODO:patrick remove this before pushing
+	validatorTemplate = template.Must(template.New("validator").Funcs(utils.GetTemplateFuncs()).ParseFiles("templates/layout.html", "templates/validator.html"))
+
 	vars := mux.Vars(r)
 
 	var index uint64
@@ -468,6 +471,54 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		logger.Errorf("error retrieving zero voted ether epochs: %v", err)
 		http.Error(w, "Internal server error", 503)
 		return
+	}
+
+	var finalityDelay []struct {
+		Epoch uint64
+		Delay uint64
+	}
+	err = db.DB.Select(&finalityDelay, `
+		SELECT
+			headepoch as epoch,
+			(headepoch - finalizedepoch) as delay
+		FROM network_liveness
+		WHERE headepoch >= $1`,
+		validatorPageData.ActivationEpoch)
+	if err != nil {
+		logger.Errorf("error retrieving finality delay: %v", err)
+		http.Error(w, "Internal server error", 503)
+		return
+	}
+
+	validatorPageData.FinalityDelayChartData = make([][]float64, len(finalityDelay))
+	for i, v := range finalityDelay {
+		validatorPageData.FinalityDelayChartData[i] = []float64{
+			float64(utils.EpochToTime(v.Epoch).Unix() * 1000),
+			float64(v.Delay),
+		}
+	}
+
+	var participationRate []struct {
+		Epoch                   uint64
+		Globalparticipationrate float64
+	}
+	err = db.DB.Select(&participationRate, `
+		SELECT epoch, globalparticipationrate
+		FROM epochs
+		WHERE epoch >= $1
+		ORDER BY epoch`,
+		validatorPageData.ActivationEpoch)
+	if err != nil {
+		logger.Errorf("error retrieving participation rate: %v", err)
+		http.Error(w, "Internal server error", 503)
+		return
+	}
+	validatorPageData.ParticipationRateChartData = make([][]float64, len(participationRate))
+	for i, v := range participationRate {
+		validatorPageData.ParticipationRateChartData[i] = []float64{
+			float64(utils.EpochToTime(v.Epoch).Unix() * 1000),
+			v.Globalparticipationrate,
+		}
 	}
 
 	data.Data = validatorPageData

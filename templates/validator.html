@@ -135,15 +135,23 @@
 			})
 		}
 
-		var zeroVotedEpochs = {{.ZeroVotedEpochs}}
-		for (var i=0; i<zeroVotedEpochs.length; i++) {
-			plotLines.push({
-				color: 'blue',
-				className: 'chart-plotLine-zeroVotedEpoch',
-				width: 1,
-				value: epochToTime(zeroVotedEpochs[i])
-			})
+		// var zeroVotedEpochs = {{.ZeroVotedEpochs}}
+		// for (var i=0; i<zeroVotedEpochs.length; i++) {
+		// 	plotLines.push({
+		// 		color: 'blue',
+		// 		className: 'chart-plotLine-zeroVotedEpoch',
+		// 		width: 1,
+		// 		value: epochToTime(zeroVotedEpochs[i])
+		// 	})
+		// }
+		var bcd = {{.BalanceHistoryChartData}}
+		var diff = new Array(bcd.length-1)
+		for (var i=1; i<bcd.length; i++) {
+			var a = bcd[i-1]
+			var b = bcd[i]
+			diff[i-1] = [b[0],b[1]-a[1]]
 		}
+
 		Highcharts.stockChart('balancechart', {
 			colors: ["#7cb5ec", "#90ed7d", "#f7a35c", "#8085e9", "#f15c80", "#e4d354", "#2b908f", "#f45b5b", "#91e8e1"],
 			rangeSelector: {
@@ -183,6 +191,14 @@
 					text: 'Balance [ETH]'
 				},
 				opposite: false
+			}, {
+				title: {
+					text: 'Finality Delay (Epochs)'
+				}
+			}, {
+				title: {
+					text: 'Participation Rate'
+				}
 			}],
 			series: [{
 				name: "Balance",
@@ -191,6 +207,19 @@
 				name: "Effective Balance",
 				step: true,
 				data: {{.EffectiveBalanceHistoryChartData}}
+			}, {
+				name: "Balance Diff",
+				data: diff
+			}, {
+				name: "Finality Delay",
+				step: true,
+				yAxis: 1,
+				data: {{.FinalityDelayChartData}}
+			}, {
+				name: "Global Participation Rate",
+				step: true,
+				yAxis: 1,
+				data: {{.ParticipationRateChartData}}
 			}, {
 				name: "Missed Attestations",
 				color: "#f00",
