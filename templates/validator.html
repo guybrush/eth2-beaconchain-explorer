@@ -158,7 +158,9 @@
 				enabled: false
 			},
 			chart: {
-				type: 'line'
+				type: 'line',
+				zoomType: 'x',
+				panKey: 'alt',
 			},
 			title: {
 				text: 'Balance History for Validator {{.Index}}'
@@ -207,10 +209,11 @@
 				name: "Effective Balance",
 				step: true,
 				data: {{.EffectiveBalanceHistoryChartData}}
-			}, {
-				name: "Balance Diff",
-				data: diff
-			}, {
+			}, 
+			// { name: "Balance Diff",
+			// 	data: diff
+			// }, 
+			{
 				name: "Finality Delay",
 				step: true,
 				yAxis: 1,
