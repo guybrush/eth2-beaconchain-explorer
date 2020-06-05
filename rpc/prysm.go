@@ -214,6 +214,9 @@ func (pc *PrysmClient) GetEpochAssignments(epoch uint64) (*types.EpochAssignment
 		//logger.Printf("retrieved %v assignments of %v for epoch %v", len(validatorAssignmentes), validatorAssignmentResponse.TotalSize, epoch)
 
 		if validatorAssignmentResponse.NextPageToken == "" || validatorAssignmentResponse.TotalSize == 0 || len(validatorAssignmentes) == int(validatorAssignmentResponse.TotalSize) {
+			if len(validatorAssignmentes) != int(validatorAssignmentResponse.TotalSize) {
+				logger.Errorf("error retrieving validator assignments, resp.TotalSize does not match the received dataset for epoch %v: %v != %v", epoch, validatorAssignmentResponse.TotalSize, len(validatorAssignmentes))
+			}
 			break
 		}
 	}
