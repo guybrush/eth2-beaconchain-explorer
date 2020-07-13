@@ -387,46 +387,55 @@ func participationRateChartData() (*types.GenericChartData, error) {
 
 func averageDailyValidatorIncomeChartData() (*types.GenericChartData, error) {
 	rows := []struct {
-		Epoch           uint64
-		Validatorscount uint64
-		Rewards         int64
+		Epoch      uint64
+		AvgRewards float64
 	}{}
 
 	err := db.DB.Select(&rows, `
 		with
 			firstdeposits as (
 				select distinct
-					vb.epoch,
-					sum(coalesce(vb.balance,32e9)) over (order by v.activationepoch asc) as amount
-				from validators v
-					left join validator_balances vb
-						on vb.validatorindex = v.validatorindex
-						and vb.epoch = v.activationepoch
-				order by vb.epoch
+					validators.activationepoch AS epoch,
+					sum(d.amount) over ( order by validators.activationepoch asc ) as amount
+				from blocks_deposits d
+					inner join validators
+						on d.publickey = validators.pubkey
+						and d.block_slot/32 <= validators.activationepoch
+				order by epoch
 			),
 			extradeposits as (
 				select distinct
 					(d.block_slot/32)-1 AS epoch,
-					sum(d.amount) over (
-						order by d.block_slot/32 asc
-					) as amount
-				from validators
-					inner join blocks_deposits d
-						on d.publickey = validators.pubkey
-						and d.block_slot/32 > validators.activationepoch
+					sum(d.amount) over ( order by d.block_slot/32 asc ) as amount
+				from blocks_deposits d
+					inner join validators v
+						on v.pubkey = d.publickey
+						and v.activationepoch < d.block_slot/32
+				order by epoch
+			),
+			exitdeposits as (
+				select distinct
+					v.exitepoch AS epoch,
+					sum(d.amount) over (order by d.block_slot/32 asc) as amount
+				from blocks_deposits d
+					inner join validators v 
+						on v.pubkey = d.publickey
+						and v.exitepoch < d.block_slot/32
 				order by epoch
 			)
 		select 
 			e.epoch,
-			e.validatorscount,
-			e.totalvalidatorbalance-coalesce(fd.amount,0)-coalesce(ed.amount,0) as rewards
+			(e.totalvalidatorbalance - coalesce(fd.amount,0) - coalesce(ed.amount,0) + coalesce(xd.amount,0))::decimal/e.validatorscount as avgrewards
 		from epochs e
 			left join firstdeposits fd on fd.epoch = (
 				select epoch from firstdeposits where epoch <= e.epoch order by epoch desc limit 1
 			)
-			left join extradeposits ed on fd.epoch = (
+			left join extradeposits ed on ed.epoch = (
 				select epoch from extradeposits where epoch <= e.epoch order by epoch desc limit 1
 			)
+			left join exitdeposits xd on xd.epoch = (
+				select epoch from exitdeposits where epoch <= e.epoch order by epoch desc limit 1
+		)
 		order by epoch`)
 	if err != nil {
 		return nil, err
@@ -434,29 +443,27 @@ func averageDailyValidatorIncomeChartData() (*types.GenericChartData, error) {
 
 	seriesData := [][]float64{}
 
-	var rewards int64
+	var rewards float64
 	var day float64
-	validatorsCount := uint64(0)
-	prevDayRewards := int64(0)
+	prevDayRewards := float64(0)
 	prevDay := float64(utils.EpochToTime(0).Truncate(time.Hour*24).Unix() * 1000)
 	for _, row := range rows {
-		validatorsCount = row.Validatorscount
-		rewards = row.Rewards
+		rewards = row.AvgRewards
 		day = float64(utils.EpochToTime(row.Epoch).Truncate(time.Hour*24).Unix() * 1000)
 		if day != prevDay {
 			// data for previous day
 			seriesData = append(seriesData, []float64{
 				prevDay,
-				utils.RoundDecimals(float64(rewards-prevDayRewards)/float64(validatorsCount)/1e9, 4),
+				utils.RoundDecimals(float64(rewards-prevDayRewards)/1e9, 4),
 			})
-			prevDayRewards = row.Rewards
+			prevDayRewards = row.AvgRewards
 			prevDay = day
 		}
 	}
 	// data for current day
 	seriesData = append(seriesData, []float64{
 		day,
-		utils.RoundDecimals(float64(rewards-prevDayRewards)/float64(validatorsCount)/1e9, 4),
+		utils.RoundDecimals(float64(rewards-prevDayRewards)/1e9, 4),
 	})
 
 	chartData := &types.GenericChartData{
@@ -493,6 +500,7 @@ func stakingRewardsChartData() (*types.GenericChartData, error) {
 					left join validator_balances vb
 						on vb.validatorindex = v.validatorindex
 						and vb.epoch = v.activationepoch
+						and vb.epoch < v.exitepoch
 				order by vb.epoch
 			),
 			extradeposits as (
@@ -505,6 +513,7 @@ func stakingRewardsChartData() (*types.GenericChartData, error) {
 					inner join blocks_deposits d
 						on d.publickey = validators.pubkey
 						and d.block_slot/32 > validators.activationepoch
+						and d.block_slot/32 < validators.exitepoch
 				order by epoch
 			)
 		select 
