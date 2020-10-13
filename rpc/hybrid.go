@@ -12,7 +12,7 @@ import (
 // HybridClient connects to prysm and lighthouse
 type HybridClient struct {
 	prysmClient *PrysmClient
-	apiClient   *Eth2ApiV1Client
+	apiClient   *Eth2ApiClient
 }
 
 func NewHybridClient(prysmEndpoint, apiEndpoint string) (*HybridClient, error) {
@@ -20,7 +20,7 @@ func NewHybridClient(prysmEndpoint, apiEndpoint string) (*HybridClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	apiClient, err := NewPrysmClient(apiEndpoint)
+	apiClient, err := NewEth2ApiClient(apiEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func NewHybridClient(prysmEndpoint, apiEndpoint string) (*HybridClient, error) {
 		prysmClient: prysmClient,
 		apiClient:   apiClient,
 	}
-	return nil, nil
+	return c, nil
 }
 
 func (c *HybridClient) GetChainHead() (*types.ChainHead, error) {

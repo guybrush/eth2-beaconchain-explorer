@@ -50,6 +50,7 @@ func main() {
 		var rpcClient rpc.Client
 
 		if utils.Config.Indexer.Node.Type == "prysm" {
+			logrus.Info("using prysm-exporter")
 			if utils.Config.Indexer.Node.PageSize == 0 {
 				logrus.Printf("setting default rpc page size to 500")
 				utils.Config.Indexer.Node.PageSize = 500
@@ -59,11 +60,19 @@ func main() {
 				logrus.Fatal(err)
 			}
 		} else if utils.Config.Indexer.Node.Type == "lighthouse" {
+			logrus.Info("using lighthouse-exporter")
 			rpcClient, err = rpc.NewLighthouseClient(cfg.Indexer.Node.Host + ":" + cfg.Indexer.Node.Port)
 			if err != nil {
 				logrus.Fatal(err)
 			}
+		} else if utils.Config.Indexer.Node.Type == "eth2api" {
+			logrus.Info("using eth2api-exporter")
+			rpcClient, err = rpc.NewEth2ApiClient(cfg.Indexer.Node.Host)
+			if err != nil {
+				logrus.Fatal(err)
+			}
 		} else if utils.Config.Indexer.Node.Type == "hybrid" {
+			logrus.Info("using HYBRID-exporter")
 			rpcClient, err = rpc.NewHybridClient(cfg.Indexer.Node.Host, cfg.Indexer.Node.Port)
 			if err != nil {
 				logrus.Fatal(err)

@@ -3,12 +3,18 @@ module eth2-exporter
 go 1.14
 
 require (
+	github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 // indirect
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/bmizerany/assert v0.0.0-20160611221934-b7ed37b82869 // indirect
 	github.com/chromedp/cdproto v0.0.0-20200709115526-d1f6fc58448b
 	github.com/chromedp/chromedp v0.5.3
 	github.com/cloudflare/roughtime v0.0.0-20200528200038-bacff06d032d // indirect
+	github.com/containerd/fifo v0.0.0-20200410184934-f15a3290365b // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
+	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
+	github.com/docker/go-connections v0.4.0 // indirect
+	github.com/docker/go-metrics v0.0.1 // indirect
+	github.com/docker/go-units v0.4.0 // indirect
 	github.com/ethereum/go-ethereum v1.9.14
 	github.com/go-openapi/spec v0.19.9 // indirect
 	github.com/go-openapi/swag v0.19.9 // indirect
@@ -28,6 +34,8 @@ require (
 	github.com/mailgun/mailgun-go/v4 v4.1.3
 	github.com/mailru/easyjson v0.7.3 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/opencontainers/image-spec v1.0.1 // indirect
 	github.com/phyber/negroni-gzip v0.0.0-20180113114010-ef6356a5d029
 	github.com/pkg/errors v0.9.1
 	github.com/prysmaticlabs/ethereumapis v0.0.0-20200827165051-58ccb36e36b9

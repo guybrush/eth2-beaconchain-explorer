@@ -14,7 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type Eth2ApiV1Client struct {
+type Eth2ApiClient struct {
 	client                      *eth2api.Client
 	proposerAssignmentsCache    *lru.Cache
 	proposerAssignmentsCacheMux *sync.Mutex
@@ -24,13 +24,13 @@ type Eth2ApiV1Client struct {
 	validatorsCacheMux          *sync.Mutex
 }
 
-func NewEth2ApiV1Client(endpoint string) (*Eth2ApiV1Client, error) {
+func NewEth2ApiClient(endpoint string) (*Eth2ApiClient, error) {
 	c, err := eth2api.NewClient(endpoint)
 	if err != nil {
 		return nil, err
 	}
 
-	client := &Eth2ApiV1Client{
+	client := &Eth2ApiClient{
 		client:                      c,
 		proposerAssignmentsCacheMux: &sync.Mutex{},
 		attesterAssignmentsCacheMux: &sync.Mutex{},
@@ -44,7 +44,7 @@ func NewEth2ApiV1Client(endpoint string) (*Eth2ApiV1Client, error) {
 	return client, nil
 }
 
-func (c *Eth2ApiV1Client) GetChainHead() (*types.ChainHead, error) {
+func (c *Eth2ApiClient) GetChainHead() (*types.ChainHead, error) {
 	headers, err := c.client.GetHeaders()
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (c *Eth2ApiV1Client) GetChainHead() (*types.ChainHead, error) {
 	}, nil
 }
 
-func (c *Eth2ApiV1Client) GetEpochData(epoch uint64) (*types.EpochData, error) {
+func (c *Eth2ApiClient) GetEpochData(epoch uint64) (*types.EpochData, error) {
 	var err error
 
 	t0 := time.Now()
@@ -179,6 +179,13 @@ func (c *Eth2ApiV1Client) GetEpochData(epoch uint64) (*types.EpochData, error) {
 
 	t3 := time.Now()
 
+	// todo get committees (again)
+
+	data.EpochParticipationStats, err = c.GetValidatorParticipation(epoch)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving epoch participation statistics for epoch %v: %v", epoch, err)
+	}
+
 	logger.WithFields(logrus.Fields{
 		"validators":     len(data.Validators),
 		"blocks":         len(data.Blocks),
@@ -191,7 +198,7 @@ func (c *Eth2ApiV1Client) GetEpochData(epoch uint64) (*types.EpochData, error) {
 	return data, nil
 }
 
-func (c *Eth2ApiV1Client) GetValidators(epoch uint64) ([]*eth2api.Validator, error) {
+func (c *Eth2ApiClient) GetValidators(epoch uint64) ([]*eth2api.Validator, error) {
 	c.validatorsCacheMux.Lock()
 	defer c.validatorsCacheMux.Unlock()
 
@@ -214,16 +221,16 @@ func (c *Eth2ApiV1Client) GetValidators(epoch uint64) ([]*eth2api.Validator, err
 	return validators, nil
 }
 
-func (c *Eth2ApiV1Client) GetValidatorQueue() (*types.ValidatorQueue, error) {
+func (c *Eth2ApiClient) GetValidatorQueue() (*types.ValidatorQueue, error) {
 	return nil, nil
 }
 
 // GetAttestationPool is not needed
-func (c *Eth2ApiV1Client) GetAttestationPool() ([]*types.Attestation, error) {
+func (c *Eth2ApiClient) GetAttestationPool() ([]*types.Attestation, error) {
 	return []*types.Attestation{}, nil
 }
 
-func (c *Eth2ApiV1Client) GetEpochAssignments(epoch uint64) (*types.EpochAssignments, error) {
+func (c *Eth2ApiClient) GetEpochAssignments(epoch uint64) (*types.EpochAssignments, error) {
 	c.proposerAssignmentsCacheMux.Lock()
 	defer c.proposerAssignmentsCacheMux.Unlock()
 
@@ -255,12 +262,12 @@ func (c *Eth2ApiV1Client) GetEpochAssignments(epoch uint64) (*types.EpochAssignm
 		}
 		if len(assignments.ProposerAssignments) > 0 {
 			c.proposerAssignmentsCache.Add(epoch, assignments.ProposerAssignments)
+			logger.WithFields(logrus.Fields{
+				"dur":                 time.Since(start),
+				"epoch":               epoch,
+				"proposerAssignments": len(assignments.ProposerAssignments),
+			}).Info("cached proposerAssignments")
 		}
-		logger.WithFields(logrus.Fields{
-			"dur":                 time.Since(start),
-			"epoch":               epoch,
-			"proposerAssignments": len(assignments.ProposerAssignments),
-		}).Info("cached proposerAssignments")
 	}
 
 	cachedAttesterAssignments, found := c.attesterAssignmentsCache.Get(epoch)
@@ -280,18 +287,18 @@ func (c *Eth2ApiV1Client) GetEpochAssignments(epoch uint64) (*types.EpochAssignm
 		}
 		if len(assignments.AttestorAssignments) > 0 {
 			c.attesterAssignmentsCache.Add(epoch, assignments.AttestorAssignments)
+			logger.WithFields(logrus.Fields{
+				"dur":                 time.Since(start),
+				"epoch":               epoch,
+				"attesterAssignments": len(assignments.AttestorAssignments),
+			}).Info("cached attesterAssignments")
 		}
-		logger.WithFields(logrus.Fields{
-			"dur":                 time.Since(start),
-			"epoch":               epoch,
-			"attesterAssignments": len(assignments.AttestorAssignments),
-		}).Info("cached attesterAssignments")
 	}
 
 	return assignments, nil
 }
 
-func (c *Eth2ApiV1Client) GetBlocksBySlot(slot uint64) ([]*types.Block, error) {
+func (c *Eth2ApiClient) GetBlocksBySlot(slot uint64) ([]*types.Block, error) {
 	t0 := time.Now()
 	slotStr := fmt.Sprintf("%v", slot)
 
@@ -473,7 +480,7 @@ func (c *Eth2ApiV1Client) GetBlocksBySlot(slot uint64) ([]*types.Block, error) {
 	return []*types.Block{&b2}, nil
 }
 
-func (c *Eth2ApiV1Client) GetValidatorParticipation(epoch uint64) (*types.ValidatorParticipation, error) {
+func (c *Eth2ApiClient) GetValidatorParticipation(epoch uint64) (*types.ValidatorParticipation, error) {
 	// if err != nil {
 	// 	logger.Printf("error retrieving epoch participation statistics: %v", err)
 	// 	return &types.ValidatorParticipation{
