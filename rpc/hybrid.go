@@ -12,11 +12,16 @@ import (
 // HybridClient connects to prysm and lighthouse
 type HybridClient struct {
 	prysmClient *PrysmClient
+	lhClient    *LighthouseClient
 	apiClient   *Eth2ApiClient
 }
 
-func NewHybridClient(prysmEndpoint, apiEndpoint string) (*HybridClient, error) {
+func NewHybridClient(prysmEndpoint, lhEndpoint, apiEndpoint string) (*HybridClient, error) {
 	prysmClient, err := NewPrysmClient(prysmEndpoint)
+	if err != nil {
+		return nil, err
+	}
+	lhClient, err := NewLighthouseClient(lhEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -26,6 +31,7 @@ func NewHybridClient(prysmEndpoint, apiEndpoint string) (*HybridClient, error) {
 	}
 	c := &HybridClient{
 		prysmClient: prysmClient,
+		lhClient:    lhClient,
 		apiClient:   apiClient,
 	}
 	return c, nil
@@ -132,13 +138,21 @@ func (c *HybridClient) GetEpochData(epoch uint64) (*types.EpochData, error) {
 
 	t3 := time.Now()
 
+	data.EpochParticipationStats, err = c.GetValidatorParticipation(epoch)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving epoch participation statistics for epoch %v: %v", epoch, err)
+	}
+
+	t4 := time.Now()
+
 	logger.WithFields(logrus.Fields{
-		"validators":     len(data.Validators),
-		"blocks":         len(data.Blocks),
-		"dur":            time.Since(t0),
-		"durValidators":  t3.Sub(t2),
-		"durBlocks":      t2.Sub(t1),
-		"durAssignments": t1.Sub(t0),
+		"validators":       len(data.Validators),
+		"blocks":           len(data.Blocks),
+		"dur":              time.Since(t0),
+		"durParticipation": t4.Sub(t3),
+		"durValidators":    t3.Sub(t2),
+		"durBlocks":        t2.Sub(t1),
+		"durAssignments":   t1.Sub(t0),
 	}).Info("GetEpochData")
 
 	return data, nil
@@ -153,7 +167,7 @@ func (c *HybridClient) GetAttestationPool() ([]*types.Attestation, error) {
 }
 
 func (c *HybridClient) GetEpochAssignments(epoch uint64) (*types.EpochAssignments, error) {
-	return c.prysmClient.GetEpochAssignments(epoch)
+	return c.lhClient.GetEpochAssignments(epoch)
 }
 
 func (c *HybridClient) GetBlocksBySlot(slot uint64) ([]*types.Block, error) {

@@ -10,6 +10,7 @@ import (
 	"eth2-exporter/utils"
 	"flag"
 	"net/http"
+	"strings"
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger"
@@ -73,7 +74,8 @@ func main() {
 			}
 		} else if utils.Config.Indexer.Node.Type == "hybrid" {
 			logrus.Info("using HYBRID-exporter")
-			rpcClient, err = rpc.NewHybridClient(cfg.Indexer.Node.Host, cfg.Indexer.Node.Port)
+			endpoints := strings.Split(cfg.Indexer.Node.Host, ";")
+			rpcClient, err = rpc.NewHybridClient(endpoints[0], endpoints[1], endpoints[2])
 			if err != nil {
 				logrus.Fatal(err)
 			}
