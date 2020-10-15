@@ -23,6 +23,12 @@ type PrysmClient struct {
 	conn                *grpc.ClientConn
 	assignmentsCache    *lru.Cache
 	assignmentsCacheMux *sync.Mutex
+	assignmentsChans    map[uint64][]chan AssignmentsResponse
+}
+
+type AssignmentsResponse struct {
+	Result *types.EpochAssignments
+	Error  error
 }
 
 // NewPrysmClient is used for a new Prysm client connection
@@ -43,6 +49,7 @@ func NewPrysmClient(endpoint string) (*PrysmClient, error) {
 		nodeClient:          nodeClient,
 		conn:                conn,
 		assignmentsCacheMux: &sync.Mutex{},
+		assignmentsChans:    make(map[uint64][]chan AssignmentsResponse),
 	}
 	client.assignmentsCache, _ = lru.New(10)
 
@@ -153,23 +160,47 @@ func (pc *PrysmClient) GetAttestationPool() ([]*types.Attestation, error) {
 
 // GetEpochAssignments will get the epoch assignments from a Prysm client
 func (pc *PrysmClient) GetEpochAssignments(epoch uint64) (*types.EpochAssignments, error) {
-
 	pc.assignmentsCacheMux.Lock()
-	defer pc.assignmentsCacheMux.Unlock()
 
-	var err error
-
+	// check if value is cached and return if so
 	cachedValue, found := pc.assignmentsCache.Get(epoch)
 	if found {
+		// logger.Infof("returning cached assignements for epoch %v", epoch)
+		pc.assignmentsCacheMux.Unlock()
 		return cachedValue.(*types.EpochAssignments), nil
 	}
 
-	logger.Infof("caching assignements for epoch %v", epoch)
-	start := time.Now()
+	// check if assignments are being fetched currently and wait if so
+	assignmentsResponseChan := make(chan AssignmentsResponse)
+	if _, exists := pc.assignmentsChans[epoch]; exists {
+		// logger.Infof("waiting for assignements for epoch %v", epoch)
+		pc.assignmentsChans[epoch] = append(pc.assignmentsChans[epoch], assignmentsResponseChan)
+		pc.assignmentsCacheMux.Unlock()
+		res := <-assignmentsResponseChan
+		return res.Result, res.Error
+	}
+
+	pc.assignmentsChans[epoch] = []chan AssignmentsResponse{}
+	pc.assignmentsCacheMux.Unlock()
+
+	var err error
 	assignments := &types.EpochAssignments{
 		ProposerAssignments: make(map[uint64]uint64),
 		AttestorAssignments: make(map[string]uint64),
 	}
+
+	defer func(assignments *types.EpochAssignments, err error) {
+		pc.assignmentsCacheMux.Lock()
+		res := AssignmentsResponse{Result: assignments, Error: err}
+		for _, ch := range pc.assignmentsChans[epoch] {
+			ch <- res
+		}
+		delete(pc.assignmentsChans, epoch)
+		pc.assignmentsCacheMux.Unlock()
+	}(assignments, err)
+
+	// logger.Infof("fetching assignements for epoch %v", epoch)
+	start := time.Now()
 
 	// Retrieve the currently active validator set in order to map public keys to indexes
 	validators := make(map[string]uint64)
@@ -234,10 +265,12 @@ func (pc *PrysmClient) GetEpochAssignments(epoch uint64) (*types.EpochAssignment
 	}
 
 	if len(assignments.AttestorAssignments) > 0 && len(assignments.ProposerAssignments) > 0 {
+		pc.assignmentsCacheMux.Lock()
 		pc.assignmentsCache.Add(epoch, assignments)
+		pc.assignmentsCacheMux.Unlock()
 	}
 
-	logger.Infof("cached assignements for epoch %v took %v", epoch, time.Since(start))
+	logger.Infof("fetched assignements for epoch %v took %v", epoch, time.Since(start))
 	return assignments, nil
 }
 

@@ -9,7 +9,10 @@ import (
 	"eth2-exporter/types"
 	"eth2-exporter/utils"
 	"flag"
+	"fmt"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger"
@@ -37,6 +40,11 @@ func main() {
 		logrus.Fatalf("error reading config file: %v", err)
 	}
 	utils.Config = cfg
+
+	if true {
+		exportEpochs()
+		return
+	}
 
 	db.MustInitDB(cfg.Database.Username, cfg.Database.Password, cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 	defer db.DB.Close()
@@ -273,4 +281,54 @@ func main() {
 	utils.WaitForCtrlC()
 
 	logrus.Println("exiting...")
+}
+
+func exportEpochs() {
+	startEpoch := uint64(16160)
+	endEpoch := uint64(16170)
+	t0 := time.Now()
+
+	var err error
+	var rpcClient rpc.Client
+
+	if utils.Config.Indexer.Node.Type == "prysm" {
+		if utils.Config.Indexer.Node.PageSize == 0 {
+			logrus.Printf("setting default rpc page size to 500")
+			utils.Config.Indexer.Node.PageSize = 500
+		}
+		rpcClient, err = rpc.NewPrysmClient(utils.Config.Indexer.Node.Host + ":" + utils.Config.Indexer.Node.Port)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+	} else if utils.Config.Indexer.Node.Type == "lighthouse" {
+		rpcClient, err = rpc.NewLighthouseClient(utils.Config.Indexer.Node.Host + ":" + utils.Config.Indexer.Node.Port)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+	} else {
+		logrus.Fatalf("invalid note type %v specified. supported node types are prysm and lighthouse", utils.Config.Indexer.Node.Type)
+	}
+
+	l := int(endEpoch - startEpoch)
+	var done uint64
+	wg := sync.WaitGroup{}
+	wg.Add(l)
+	maxRoutinesGuard := make(chan int, 10)
+	for i := int(startEpoch); i <= int(endEpoch); i++ {
+		maxRoutinesGuard <- 1
+		go func(epoch uint64) {
+			defer wg.Done()
+			defer func() { <-maxRoutinesGuard }()
+			t1 := time.Now()
+			_, err := rpcClient.GetEpochData(epoch)
+			newDone := atomic.AddUint64(&done, 1)
+			logrus.Printf("DEBUG: %v: %v (%v)", epoch, time.Since(t1), newDone)
+			if err != nil {
+				fmt.Println("error", epoch, err)
+				return
+			}
+		}(uint64(i))
+	}
+	wg.Wait()
+	logrus.Printf("DEBUG: done %v", time.Since(t0))
 }
