@@ -37,9 +37,16 @@ func main() {
 		logrus.Fatal("invalid chain configuration specified, you must specify the slots per epoch, seconds per slot and genesis timestamp in the config file")
 	}
 
-	exportValidatorStatuses()
+	go func() {
+		for {
+			exportValidatorStatuses()
+			time.Sleep(time.Second * 12)
+		}
+	}()
 
-	logrus.Println("done...")
+	utils.WaitForCtrlC()
+
+	logrus.Println("exitting ...")
 }
 
 func exportValidatorStatuses() {
