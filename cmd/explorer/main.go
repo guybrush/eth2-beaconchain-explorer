@@ -11,6 +11,7 @@ import (
 	"eth2-exporter/version"
 	"flag"
 	"net/http"
+	"strings"
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger"
@@ -49,10 +50,11 @@ func main() {
 		logrus.Fatal("invalid chain configuration specified, you must specify the slots per epoch, seconds per slot and genesis timestamp in the config file")
 	}
 
-	if cfg.OneTimeExport.Enabled {
+	if cfg.Indexer.Enabled || cfg.OneTimeExport.Enabled {
 		var rpcClient rpc.Client
 
 		if utils.Config.Indexer.Node.Type == "prysm" {
+			logrus.Info("using prysm-exporter")
 			if utils.Config.Indexer.Node.PageSize == 0 {
 				logrus.Printf("setting default rpc page size to 500")
 				utils.Config.Indexer.Node.PageSize = 500
@@ -62,40 +64,34 @@ func main() {
 				logrus.Fatal(err)
 			}
 		} else if utils.Config.Indexer.Node.Type == "lighthouse" {
+			logrus.Info("using lighthouse-exporter")
 			rpcClient, err = rpc.NewLighthouseClient(cfg.Indexer.Node.Host + ":" + cfg.Indexer.Node.Port)
+			if err != nil {
+				logrus.Fatal(err)
+			}
+		} else if utils.Config.Indexer.Node.Type == "eth2api" {
+			logrus.Info("using eth2api-exporter")
+			rpcClient, err = rpc.NewEth2ApiClient(cfg.Indexer.Node.Host)
+			if err != nil {
+				logrus.Fatal(err)
+			}
+		} else if utils.Config.Indexer.Node.Type == "hybrid" {
+			logrus.Info("using HYBRID-exporter")
+			endpoints := strings.Split(cfg.Indexer.Node.Host, ";")
+			rpcClient, err = rpc.NewHybridClient(endpoints[0], endpoints[1], endpoints[2])
 			if err != nil {
 				logrus.Fatal(err)
 			}
 		} else {
 			logrus.Fatalf("invalid note type %v specified. supported node types are prysm and lighthouse", utils.Config.Indexer.Node.Type)
 		}
-		err := exporter.ExportEpoch(cfg.OneTimeExport.Epoch, rpcClient)
+		if cfg.OneTimeExport.Enabled {
+			err := exporter.ExportEpoch(cfg.OneTimeExport.Epoch, rpcClient)
 
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		return
-	}
-
-	if cfg.Indexer.Enabled {
-		var rpcClient rpc.Client
-
-		if utils.Config.Indexer.Node.Type == "prysm" {
-			if utils.Config.Indexer.Node.PageSize == 0 {
-				logrus.Printf("setting default rpc page size to 500")
-				utils.Config.Indexer.Node.PageSize = 500
-			}
-			rpcClient, err = rpc.NewPrysmClient(cfg.Indexer.Node.Host + ":" + cfg.Indexer.Node.Port)
 			if err != nil {
 				logrus.Fatal(err)
 			}
-		} else if utils.Config.Indexer.Node.Type == "lighthouse" {
-			rpcClient, err = rpc.NewLighthouseClient(cfg.Indexer.Node.Host + ":" + cfg.Indexer.Node.Port)
-			if err != nil {
-				logrus.Fatal(err)
-			}
-		} else {
-			logrus.Fatalf("invalid note type %v specified. supported node types are prysm and lighthouse", utils.Config.Indexer.Node.Type)
+			return
 		}
 		go exporter.Start(rpcClient)
 	}
