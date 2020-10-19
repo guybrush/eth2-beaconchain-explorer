@@ -19,7 +19,7 @@ type chartHandler struct {
 
 var ChartHandlers = map[string]chartHandler{
 	"blocks":                         {1, blocksChartData},
-	"validators":                     {2, activeValidatorsChartData},
+	"validators":                     {2, validatorsChartData},
 	"staked_ether":                   {3, stakedEtherChartData},
 	"average_balance":                {4, averageBalanceChartData},
 	"network_liveness":               {5, networkLivenessChartData},
@@ -185,40 +185,49 @@ func blocksChartData() (*types.GenericChartData, error) {
 	return chartData, nil
 }
 
-func activeValidatorsChartData() (*types.GenericChartData, error) {
+func validatorsChartData() (*types.GenericChartData, error) {
 	rows := []struct {
-		Epoch           uint64
-		ValidatorsCount uint64
+		Epoch           uint64 `db:"epoch"`
+		Status          string `db:"status"`
+		ValidatorsCount uint64 `db:"validators_count"`
 	}{}
 
-	err := db.DB.Select(&rows, "SELECT epoch, validatorscount FROM epochs ORDER BY epoch")
+	err := db.DB.Select(&rows, "SELECT epoch, status, validators_count FROM epochs_status_stats ORDER BY epoch")
 	if err != nil {
 		return nil, err
 	}
 
-	dailyActiveValidators := [][]float64{}
-
+	lastDayMap := make(map[string]float64)
+	seriesMap := make(map[string][][]float64)
 	for _, row := range rows {
 		day := float64(utils.EpochToTime(row.Epoch).Truncate(time.Hour*24).Unix() * 1000)
-
-		if len(dailyActiveValidators) == 0 || dailyActiveValidators[len(dailyActiveValidators)-1][0] != day {
-			dailyActiveValidators = append(dailyActiveValidators, []float64{day, float64(row.ValidatorsCount)})
+		lastDay, exists := lastDayMap[row.Status]
+		if !exists || lastDay != day {
+			_, exists := seriesMap[row.Status]
+			if !exists {
+				seriesMap[row.Status] = [][]float64{}
+			}
+			seriesMap[row.Status] = append(seriesMap[row.Status], []float64{day, float64(row.ValidatorsCount)})
 		}
+		lastDayMap[row.Status] = day
+	}
+
+	series := []*types.GenericChartDataSeries{}
+	for k, v := range seriesMap {
+		series = append(series, &types.GenericChartDataSeries{
+			Name: k,
+			Data: v,
+		})
 	}
 
 	chartData := &types.GenericChartData{
 		Title:        "Validators",
-		Subtitle:     "History of daily active validators.",
+		Subtitle:     "Daily history of validators by status.",
 		XAxisTitle:   "",
 		YAxisTitle:   "# of Validators",
-		StackingMode: "false",
+		StackingMode: "normal",
 		Type:         "column",
-		Series: []*types.GenericChartDataSeries{
-			{
-				Name: "# of Validators",
-				Data: dailyActiveValidators,
-			},
-		},
+		Series:       series,
 	}
 
 	return chartData, nil
@@ -265,11 +274,11 @@ func stakedEtherChartData() (*types.GenericChartData, error) {
 
 func averageBalanceChartData() (*types.GenericChartData, error) {
 	rows := []struct {
-		Epoch                   uint64
-		AverageValidatorBalance uint64
+		Epoch                   uint64  `db:"epoch"`
+		AverageValidatorBalance float64 `db:"avg"`
 	}{}
 
-	err := db.DB.Select(&rows, "SELECT epoch, averagevalidatorbalance FROM epochs ORDER BY epoch")
+	err := db.DB.Select(&rows, "SELECT epoch, sum(total_balance)/sum(validators_count) as avg FROM epochs_status_stats GROUP BY epoch, status ORDER BY epoch")
 	if err != nil {
 		return nil, err
 	}
@@ -386,9 +395,9 @@ func participationRateChartData() (*types.GenericChartData, error) {
 
 func averageDailyValidatorIncomeChartData() (*types.GenericChartData, error) {
 	rows := []struct {
-		Epoch           uint64
-		Validatorscount uint64
-		Rewards         int64
+		Epoch           uint64 `db:"epoch"`
+		Validatorscount uint64 `db:"validators_count"`
+		Rewards         int64  `db:"rewards"`
 	}{}
 
 	err := db.DB.Select(&rows, `
@@ -414,19 +423,28 @@ func averageDailyValidatorIncomeChartData() (*types.GenericChartData, error) {
 						on d.publickey = validators.pubkey
 						and d.block_slot/32 > validators.activationepoch
 				order by epoch
+			),
+			epochtotals as (
+				select 
+					epoch,
+					sum(validators_count) as validators_count,
+					sum(total_balance) as total_balance
+				from epochs_status_stats
+				where status <> 'pending_initialized' and status <> 'pending_queued'
+				group by epoch
 			)
 		select 
 			e.epoch,
-			e.validatorscount,
-			e.totalvalidatorbalance-coalesce(fd.amount,0)-coalesce(ed.amount,0) as rewards
-		from epochs e
+			e.validators_count,
+			e.total_balance-coalesce(fd.amount,0)-coalesce(ed.amount,0) as rewards
+		from epochtotals e
 			left join firstdeposits fd on fd.epoch = (
 				select epoch from firstdeposits where epoch <= e.epoch order by epoch desc limit 1
 			)
 			left join extradeposits ed on fd.epoch = (
 				select epoch from extradeposits where epoch <= e.epoch order by epoch desc limit 1
 			)
-		order by epoch`)
+		order by e.epoch`)
 	if err != nil {
 		return nil, err
 	}
@@ -505,18 +523,27 @@ func stakingRewardsChartData() (*types.GenericChartData, error) {
 						on d.publickey = validators.pubkey
 						and d.block_slot/32 > validators.activationepoch
 				order by epoch
+			),
+			epochtotals as (
+				select 
+					epoch,
+					sum(validators_count) as validators_count,
+					sum(total_balance) as total_balance
+				from epochs_status_stats
+				where status <> 'pending_initialized' and status <> 'pending_queued'
+				group by epoch
 			)
 		select 
 			e.epoch,
-			e.totalvalidatorbalance-coalesce(fd.amount,0)-coalesce(ed.amount,0) as rewards
-		from epochs e
+			e.total_balance-coalesce(fd.amount,0)-coalesce(ed.amount,0) as rewards
+		from epochtotals e
 			left join firstdeposits fd on fd.epoch = (
 				select epoch from firstdeposits where epoch <= e.epoch order by epoch desc limit 1
 			)
-			left join extradeposits ed on ed.epoch = (
+			left join extradeposits ed on fd.epoch = (
 				select epoch from extradeposits where epoch <= e.epoch order by epoch desc limit 1
 			)
-		order by epoch`)
+		order by e.epoch`)
 	if err != nil {
 		return nil, err
 	}
@@ -678,17 +705,21 @@ func estimatedValidatorIncomeChartData() (*types.GenericChartData, error) {
 
 func stakeEffectivenessChartData() (*types.GenericChartData, error) {
 	rows := []struct {
-		Epoch                 uint64
-		Totalvalidatorbalance uint64
-		Eligibleether         uint64
+		Epoch             uint64  `db:"epoch"`
+		StakeEffectivness float64 `db:"stake_effectiveness"`
 	}{}
 
 	err := db.DB.Select(&rows, `
-		SELECT
+		select 
 			epoch, 
-			COALESCE(totalvalidatorbalance, 0) AS totalvalidatorbalance,
-			COALESCE(eligibleether, 0) AS eligibleether
-		FROM epochs ORDER BY epoch`)
+			case
+				when sum(total_effective_balance) = 0 or sum(total_balance) = 0 then 0
+				else sum(total_effective_balance)/sum(total_balance)
+			end as stake_effectiveness
+		from epochs_status_stats
+		where status like 'active%'
+		group by epoch
+		order by epoch`)
 	if err != nil {
 		return nil, err
 	}
@@ -696,15 +727,9 @@ func stakeEffectivenessChartData() (*types.GenericChartData, error) {
 	seriesData := [][]float64{}
 
 	for _, row := range rows {
-		if row.Eligibleether == 0 {
-			continue
-		}
-		if row.Totalvalidatorbalance == 0 {
-			continue
-		}
 		seriesData = append(seriesData, []float64{
 			float64(utils.EpochToTime(row.Epoch).Unix() * 1000),
-			utils.RoundDecimals(100*float64(row.Eligibleether)/float64(row.Totalvalidatorbalance), 2),
+			utils.RoundDecimals(100*row.StakeEffectivness, 2),
 		})
 	}
 

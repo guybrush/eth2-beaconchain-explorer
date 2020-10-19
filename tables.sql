@@ -137,6 +137,16 @@ create table epochs
     primary key (epoch)
 );
 
+drop table if exists epochs_status_stats;
+create table epochs_status_stats (
+    epoch                   int         not null,
+    status                  varchar(40) not null,
+    validators_count        int         not null,
+    total_balance           bigint      not null,
+    total_effective_balance bigint      not null,
+    primary key (epoch, status)
+);
+
 drop table if exists blocks;
 create table blocks
 (
