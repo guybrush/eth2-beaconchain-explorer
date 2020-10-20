@@ -315,8 +315,8 @@ var lighthouseValidatorStatusMap = map[string]string{
 	"ActiveAwaitingSlashedExit":   "active_slashed",
 	"ExitedVoluntarily":           "exited_unslashed",
 	"ExitedSlashed":               "exited_slashed",
-	"Withdrawable":                "withdrawal_possible",
-	"Withdrawn":                   "withdrawal_done",
+	"Withdrawable":                "withdrawable",
+	"Withdrawn":                   "withdrawn",
 }
 
 type LighthouseValidatorStatus map[string]int
@@ -352,6 +352,55 @@ func (vs *ValidatorStatus) UnmarshalJSON(data []byte) error {
 }
 
 type Validator struct {
+	Index     uint64 `json:"index,string"`
+	Balance   uint64 `json:"balance,string"`
+	Status    string `json:"status"`
+	Validator struct {
+		Pubkey                     []byte `json:"pubkey"`
+		WithdrawalCredentials      []byte `json:"withdrawal_credentials"`
+		EffectiveBalance           uint64 `json:"effective_balance"`
+		Slashed                    bool   `json:"slashed"`
+		ActivationEligibilityEpoch uint64 `json:"activation_eligibility_epoch"`
+		ActivationEpoch            uint64 `json:"activation_epoch"`
+		ExitEpoch                  uint64 `json:"exit_epoch"`
+		WithdrawableEpoch          uint64 `json:"withdrawable_epoch"`
+	} `json:"validator"`
+}
+
+func (v *Validator) UnmarshalJSON(data []byte) error {
+	var vJSON validatorJSON
+	if err := json.Unmarshal(data, &vJSON); err != nil {
+		return err
+	}
+	v.Index = vJSON.Index
+	v.Balance = vJSON.Balance
+	if vJSON.Status == "withdrawable" {
+		if vJSON.Validator.Slashed {
+			v.Status = "withdrawable_slashed"
+		} else {
+			v.Status = "withdrawable_unslashed"
+		}
+	} else if vJSON.Status == "withdrawn" {
+		if vJSON.Validator.Slashed {
+			v.Status = "withdrawn_slashed"
+		} else {
+			v.Status = "withdrawn_unslashed"
+		}
+	} else {
+		v.Status = string(vJSON.Status)
+	}
+	v.Validator.Pubkey = vJSON.Validator.Pubkey
+	v.Validator.WithdrawalCredentials = vJSON.Validator.WithdrawalCredentials
+	v.Validator.EffectiveBalance = vJSON.Validator.EffectiveBalance
+	v.Validator.Slashed = vJSON.Validator.Slashed
+	v.Validator.ActivationEligibilityEpoch = vJSON.Validator.ActivationEligibilityEpoch
+	v.Validator.ActivationEpoch = vJSON.Validator.ActivationEpoch
+	v.Validator.ExitEpoch = vJSON.Validator.ExitEpoch
+	v.Validator.WithdrawableEpoch = vJSON.Validator.WithdrawableEpoch
+	return nil
+}
+
+type validatorJSON struct {
 	Index     uint64          `json:"index,string"`
 	Balance   uint64          `json:"balance,string"`
 	Status    ValidatorStatus `json:"status"`
