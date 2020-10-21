@@ -71,10 +71,12 @@ func (c *Client) get(endpoint string, result interface{}, queryParams ...interfa
 		}
 		url += "?" + strings.Join(qvs, "&")
 	}
+
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
+
 	res, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
@@ -306,10 +308,10 @@ type Checkpoint struct {
 // - PR to use statuses by LH https://github.com/ethereum/eth2.0-APIs/pull/94
 var lighthouseValidatorStatusMap = map[string]string{
 	// "Unknown":                   "unknown",
-	"WaitingForEligibility":       "pending_initialized",
+	"WaitingForEligibility":       "pending_deposited",
 	"WaitingForFinality":          "pending_initialized",
 	"WaitingInQueue":              "pending_queued",
-	"StandbyForActive":            "active_ongoing",
+	"StandbyForActive":            "pending_queued",
 	"Active":                      "active_ongoing",
 	"ActiveAwaitingVoluntaryExit": "active_exiting",
 	"ActiveAwaitingSlashedExit":   "active_slashed",
