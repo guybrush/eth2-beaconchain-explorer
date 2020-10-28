@@ -308,14 +308,14 @@ type Checkpoint struct {
 // - PR to use statuses by LH https://github.com/ethereum/eth2.0-APIs/pull/94
 var lighthouseValidatorStatusMap = map[string]string{
 	// "Unknown":                   "unknown",
-	"WaitingForEligibility":       "pending_deposited",
-	"WaitingForFinality":          "pending_initialized",
+	"WaitingForEligibility":       "pending_initialized",
+	"WaitingForFinality":          "pending_waiting",
 	"WaitingInQueue":              "pending_queued",
-	"StandbyForActive":            "pending_queued",
+	"StandbyForActive":            "pending_activating",
 	"Active":                      "active_ongoing",
 	"ActiveAwaitingVoluntaryExit": "active_exiting",
 	"ActiveAwaitingSlashedExit":   "active_slashed",
-	"ExitedVoluntarily":           "exited_unslashed",
+	"ExitedVoluntarily":           "exited_voluntarily",
 	"ExitedSlashed":               "exited_slashed",
 	"Withdrawable":                "withdrawable",
 	"Withdrawn":                   "withdrawn",
