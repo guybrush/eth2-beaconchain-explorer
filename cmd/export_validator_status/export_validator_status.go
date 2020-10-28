@@ -51,7 +51,7 @@ func main() {
 
 func exportValidatorStatuses() {
 	var fromEpoch uint64
-	err := db.DB.Get(&fromEpoch, "select coalesce(max(epoch),0) from epochs_status_stats")
+	err := db.DB.Get(&fromEpoch, "select coalesce(max(epoch),0) from validator_status_stats")
 	if err != nil {
 		panic(err)
 	}
@@ -123,7 +123,7 @@ func saveValidators(epoch uint64, validators []*eth2api.Validator) error {
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO epochs_status_stats (
+		INSERT INTO validator_status_stats (
 			epoch,
 			status,
 			validators_count,

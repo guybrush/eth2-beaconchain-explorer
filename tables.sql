@@ -123,8 +123,8 @@ create table epochs
     primary key (epoch)
 );
 
-drop table if exists epochs_status_stats;
-create table epochs_status_stats (
+drop table if exists validator_status_stats;
+create table validator_status_stats (
     epoch                   int         not null,
     status                  varchar(40) not null,
     validators_count        int         not null,
