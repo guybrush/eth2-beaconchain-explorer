@@ -9,15 +9,17 @@ import (
 	"eth2-exporter/types"
 	"eth2-exporter/utils"
 	"flag"
+	"time"
+
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/sirupsen/logrus"
-	"time"
 )
 
 func main() {
-	configPath := flag.String("config", "", "Path to the config file")
+	configPath := flag.String("config", "config.yml", "Path to the config file")
+	webHost := flag.String("host", "https://beaconcha.in", "Path to the config file")
 	flag.Parse()
 
 	logrus.Printf("config file path: %v", *configPath)
@@ -32,28 +34,35 @@ func main() {
 	db.MustInitDB(cfg.Database.Username, cfg.Database.Password, cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 	defer db.DB.Close()
 
-	// create context
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
-
 	for {
 		logrus.Infof("Updating chart images")
 		for path := range services.ChartHandlers {
 			logrus.Infof("Generating image for path %v", path)
-			var buf []byte
-			if err := chromedp.Run(ctx, elementScreenshot(`https://beaconcha.in/charts/`+path, `#chart`, &buf)); err != nil {
-				logrus.Errorf("error rendering chart page: %v", err)
-				continue
-			}
-			_, err := db.DB.Query("INSERT INTO chart_images (name, image) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET image = excluded.image", path, buf)
-
+			err := chartScreenshot(*webHost, path)
 			if err != nil {
-				logrus.Errorf("error writing image data for path %v to the database: %v", path, err)
+				logrus.Errorf("error when saving chart for %v: %v", path, err)
 			}
 		}
 
-		time.Sleep(time.Hour)
+		time.Sleep(time.Minute * 15)
 	}
+}
+
+func chartScreenshot(host, path string) error {
+	// create context
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+	toCtx, toCancel := context.WithTimeout(ctx, time.Second*10)
+	defer toCancel()
+	var buf []byte
+	if err := chromedp.Run(toCtx, elementScreenshot(host+`/charts/`+path, `#chart`, &buf)); err != nil {
+		return err
+	}
+	_, err := db.DB.Query("INSERT INTO chart_images (name, image) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET image = excluded.image", path, buf)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // elementScreenshot takes a screenshot of a specific element.
