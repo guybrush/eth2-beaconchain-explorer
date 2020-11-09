@@ -7,6 +7,7 @@ import (
 	"eth2-exporter/utils"
 	"fmt"
 	"math/big"
+	"regexp"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -33,6 +34,7 @@ var eth1DepositContractFirstBlock uint64
 var eth1DepositContractAddress common.Address
 var eth1Client *ethclient.Client
 var eth1RPCClient *gethRPC.Client
+var infuraToMuchResultsError = regexp.MustCompile("query returned more than [0-9]+ results")
 
 // eth1DepositsExporter regularly fetches the depositcontract-logs of the
 // last 100 blocks and exports the deposits into the database.
@@ -95,9 +97,21 @@ func eth1DepositsExporter() {
 
 		depositsToSave, err := fetchEth1Deposits(fromBlock, toBlock)
 		if err != nil {
-			logger.WithError(err).Errorf("error fetching eth1-deposits")
-			time.Sleep(time.Second * 5)
-			continue
+			// #TODO:patrick make this better, this is only a hotfix for now
+			// time="2020-11-09T22:39:43Z" level=error msg="error fetching eth1-deposits" error="error getting logs from eth1-client: query returned more than 10000 results" module=exporter
+			if infuraToMuchResultsError.MatchString(err.Error()) {
+				toBlock = fromBlock + 100
+				if toBlock > blockHeight {
+					toBlock = blockHeight
+				}
+				logger.Infof("limiting block-range to %v-%v when fetching eth1-deposits due to too much results", fromBlock, toBlock)
+				depositsToSave, err = fetchEth1Deposits(fromBlock, toBlock)
+			}
+			if err != nil {
+				logger.WithError(err).WithField("fromBlock", fromBlock).WithField("toBlock", toBlock).Errorf("error fetching eth1-deposits")
+				time.Sleep(time.Second * 5)
+				continue
+			}
 		}
 
 		err = saveEth1Deposits(depositsToSave)
@@ -379,7 +393,14 @@ func VerifyEth1DepositSignature(obj *ethpb.Deposit_Data) error {
 	if utils.Config.Chain.Network == "zinken" {
 		domain, err = ComputeDomain(
 			cfg.DomainDeposit,
-			[]byte{0x00, 0x00, 0x00, 0x03},
+			[]byte{0x00, 0x00, 0x00, 0x03}, // 0x00000003
+			cfg.ZeroHash[:],
+		)
+	}
+	if utils.Config.Chain.Network == "toledo" {
+		domain, err = ComputeDomain(
+			cfg.DomainDeposit,
+			[]byte{0x00, 0x70, 0x1E, 0xD0}, // 0x00701ED0
 			cfg.ZeroHash[:],
 		)
 	}
