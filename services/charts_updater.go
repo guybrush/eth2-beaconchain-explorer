@@ -18,23 +18,23 @@ type chartHandler struct {
 }
 
 var ChartHandlers = map[string]chartHandler{
-	"blocks":             {1, blocksChartData},
-	"validators":         {2, activeValidatorsChartData},
-	"staked_ether":       {3, stakedEtherChartData},
-	"average_balance":    {4, averageBalanceChartData},
-	"network_liveness":   {5, networkLivenessChartData},
-	"participation_rate": {6, participationRateChartData},
-	"inclusion_distance": {6, inclusionDistanceChartData},
-	// "incorrect_attestations":         {6, incorrectAttestationsChartData},
-	"validator_income":               {7, averageDailyValidatorIncomeChartData},
-	"staking_rewards":                {8, stakingRewardsChartData},
-	"stake_effectiveness":            {9, stakeEffectivenessChartData},
-	"balance_distribution":           {10, balanceDistributionChartData},
-	"effective_balance_distribution": {11, effectiveBalanceDistributionChartData},
-	"performance_distribution_365d":  {12, performanceDistribution365dChartData},
-	"deposits":                       {13, depositsChartData},
-	"deposits_distribution":          {13, depositsDistributionChartData},
-	"graffiti_wordcloud":             {14, graffitiCloudChartData},
+	// "blocks":             {1, blocksChartData},
+	// "validators":         {2, activeValidatorsChartData},
+	// "staked_ether":       {3, stakedEtherChartData},
+	// "average_balance":    {4, averageBalanceChartData},
+	// "network_liveness":   {5, networkLivenessChartData},
+	// "participation_rate": {6, participationRateChartData},
+	// "inclusion_distance": {6, inclusionDistanceChartData},
+	// // "incorrect_attestations":         {6, incorrectAttestationsChartData},
+	// "validator_income":               {7, averageDailyValidatorIncomeChartData},
+	// "staking_rewards":                {8, stakingRewardsChartData},
+	// "stake_effectiveness":            {9, stakeEffectivenessChartData},
+	// "balance_distribution":           {10, balanceDistributionChartData},
+	// "effective_balance_distribution": {11, effectiveBalanceDistributionChartData},
+	// "performance_distribution_365d":  {12, performanceDistribution365dChartData},
+	"deposits":              {13, depositsChartData},
+	"deposits_distribution": {13, depositsDistributionChartData},
+	"graffiti_wordcloud":    {14, graffitiCloudChartData},
 }
 
 // LatestChartsPageData returns the latest chart page data
@@ -1416,7 +1416,9 @@ func depositsDistributionChartData() (*types.GenericChartData, error) {
 	}{}
 
 	err = db.DB.Select(&rows, `
-		select from_address as address, count(*) as count
+		select 
+			(select from_address from eth1_deposits where publickey = a.publickey limit 1), 
+			count(*) as count
 		from (
 			select publickey, from_address
 			from eth1_deposits
@@ -1439,11 +1441,20 @@ func depositsDistributionChartData() (*types.GenericChartData, error) {
 		Name: "others",
 		Y:    0,
 	}
+	totalEth1Addresses := len(rows)
+	totalDeposits := uint64(0)
 	for i := range rows {
-		if i > 20 {
+		totalDeposits += rows[i].Count
+	}
+	for i := range rows {
+		if rows[i].Count*1000/totalDeposits < 1 { // addresses with <0.1% of deposits are "others"
 			othersItem.Y += rows[i].Count
 			continue
 		}
+		// if i > 100 {
+		// 	othersItem.Y += rows[i].Count
+		// 	continue
+		// }
 		seriesData = append(seriesData, seriesDataItem{
 			Name: string(utils.FormatEth1AddressString(rows[i].Address)),
 			Y:    rows[i].Count,
@@ -1453,11 +1464,15 @@ func depositsDistributionChartData() (*types.GenericChartData, error) {
 		seriesData = append(seriesData, othersItem)
 	}
 
+	genesisPercent := 100 * float64(totalDeposits) / float64(utils.Config.Chain.MinGenesisActiveValidatorCount)
+	// subtitle := fmt.Sprintf("Distribution of deposits to the Eth2-Deposit-Contract by Eth1-Addresses. There are %v deposits (%v ETH, %.2f%% of genesis-deposits) from %v Eth1-Addresses.", totalDeposits, totalDeposits*32, genesisPercent, totalEth1Addresses)
+	subtitle := fmt.Sprintf("There are %v deposits (%v ETH, %.2f%% of genesis-deposits) from %v Eth1-Addresses.", totalDeposits, totalDeposits*32, genesisPercent, totalEth1Addresses)
+
 	chartData := &types.GenericChartData{
 		IsNormalChart:    true,
 		Type:             "pie",
 		Title:            "Deposits Distribution",
-		Subtitle:         "Deposits Distribution by ETH1-Addresses.",
+		Subtitle:         subtitle, // "Distribution of deposits to the Eth2-deposit-contract by Eth1-Addresses.",
 		TooltipFormatter: `function(){ return '<b>'+this.point.name+'</b><br\>Percentage: '+this.point.percentage.toFixed(2)+'%<br\>Validators: '+this.point.y }`,
 		PlotOptionsPie: `{
 			borderWidth: 1,
@@ -1465,8 +1480,8 @@ func depositsDistributionChartData() (*types.GenericChartData, error) {
 			dataLabels: { 
 				enabled:true, 
 				formatter: function() { 
-					var name = this.point.name.length > 8 ? this.point.name.substring(0,8) : this.point.name;
-					return '<span style="stroke:none; fill: var(--font-color)"><b style="stroke:none; fill: var(--font-color)">'+name+'…</b><span style="stroke:none; fill: var(--font-color)">: '+this.point.y+' ('+this.point.percentage.toFixed(2)+'%)</span></span>' 
+					var name = this.point.name.length > 8 ? this.point.name.substring(0,8)+'…' : this.point.name;
+					return '<span style="stroke:none; fill: var(--font-color)"><b style="stroke:none; fill: var(--font-color);">'+name+'</b><span style="stroke:none; fill: var(--font-color)">: '+this.point.y+' ('+this.point.percentage.toFixed(2)+'%)</span></span>' 
 				} 
 			} 
 		}`,
