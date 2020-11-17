@@ -1415,18 +1415,31 @@ func depositsDistributionChartData() (*types.GenericChartData, error) {
 		Count   uint64
 	}{}
 
+	// - multiple eth1-addresses can deposit to the same publickey
+	// - eth1-address can deposit more than the required minimal amount to activate a validator
+	// - find distribution of deposits per eth1-addresses per publickey up to minimal amount to activate the validator
+
+	// for we count only highest depositer per publickey if multiple deposits
+	// maybe better: we could do a rolling sum up to the satisfying amount over the publickey per eth1-address
 	err = db.DB.Select(&rows, `
-		select 
-			(select from_address from eth1_deposits where publickey = a.publickey limit 1), 
-			count(*) as count
+		select highestdepositer.from_address as address, count(*)
 		from (
-			select publickey, from_address
+			select publickey
 			from eth1_deposits
 			where valid_signature = true
-			group by publickey, from_address
+			group by publickey
 			having sum(amount) >= 32e9
-		) a
-		group by from_address
+		) deposits 
+		left join (
+			select * from (
+				select from_address, publickey, sum(amount)
+				from eth1_deposits
+				group by from_address, publickey
+			) a
+			group by from_address, publickey, sum
+			having sum = max(sum)
+		) highestdepositer on deposits.publickey = highestdepositer.publickey
+		group by highestdepositer.from_address
 		order by count desc`)
 	if err != nil {
 		return nil, fmt.Errorf("error getting eth1-deposits-distribution: %w", err)
@@ -1447,7 +1460,7 @@ func depositsDistributionChartData() (*types.GenericChartData, error) {
 		totalDeposits += rows[i].Count
 	}
 	for i := range rows {
-		if rows[i].Count*1000/totalDeposits < 1 { // addresses with <0.1% of deposits are "others"
+		if rows[i].Count*1000/totalDeposits < 1 { // addresses with <0.N% of deposits are "others"
 			othersItem.Y += rows[i].Count
 			continue
 		}
@@ -1466,7 +1479,7 @@ func depositsDistributionChartData() (*types.GenericChartData, error) {
 
 	genesisPercent := 100 * float64(totalDeposits) / float64(utils.Config.Chain.MinGenesisActiveValidatorCount)
 	// subtitle := fmt.Sprintf("Distribution of deposits to the Eth2-Deposit-Contract by Eth1-Addresses. There are %v deposits (%v ETH, %.2f%% of genesis-deposits) from %v Eth1-Addresses.", totalDeposits, totalDeposits*32, genesisPercent, totalEth1Addresses)
-	subtitle := fmt.Sprintf("There are %v deposits (%v ETH, %.2f%% of genesis-deposits) from %v Eth1-Addresses.", totalDeposits, totalDeposits*32, genesisPercent, totalEth1Addresses)
+	subtitle := fmt.Sprintf("There are %v deposits (%v ETH, %.2f%% of genesis-deposits) from %v Eth1-Addresses (we count only highest depositer per publickey if multiple deposits).", totalDeposits, totalDeposits*32, genesisPercent, totalEth1Addresses)
 
 	chartData := &types.GenericChartData{
 		IsNormalChart:    true,
