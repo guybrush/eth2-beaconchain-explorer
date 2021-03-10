@@ -239,6 +239,8 @@ type ValidatorPageData struct {
 	NetworkStats                        *IndexPageData
 	EstimatedActivationTs               int64
 	InclusionDelay                      int64
+	CurrentAttestationStreak            uint64
+	LongestAttestationStreak            uint64
 }
 
 type ValidatorStatsTablePageData struct {
@@ -516,6 +518,7 @@ type BlockPageAttesterSlashing struct {
 type BlockPageProposerSlashing struct {
 	BlockSlot         uint64 `db:"block_slot"`
 	BlockIndex        uint64 `db:"block_index"`
+	BlockRoot         []byte `db:"block_root" json:"block_root"`
 	ProposerIndex     uint64 `db:"proposerindex"`
 	Header1Slot       uint64 `db:"header1_slot"`
 	Header1ParentRoot []byte `db:"header1_parentroot"`
