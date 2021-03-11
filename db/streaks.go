@@ -100,14 +100,18 @@ func UpdateAttestationStreaks() (updatedToLastFinalizedEpoch bool, err error) {
 				select 
 					b1.validatorindex, 
 					b1.status,
-					coalesce(lag(epoch) over (partition by b1.validatorindex order by epoch), coalesce(vas.start, $1)) as start,
+					coalesce(lag(epoch) over (partition by b1.validatorindex order by epoch), coalesce(vas.start, coalesce(vasunmatched.start, $1))) as start,
 					b1.epoch as end,
-					b1.epoch - coalesce(lag(epoch) over (partition by b1.validatorindex order by epoch), coalesce(vas.start, $1)) as length
+					b1.epoch - coalesce(lag(epoch) over (partition by b1.validatorindex order by epoch), coalesce(vas.start, coalesce(vasunmatched.start, $1))) as length
 				from boundings b1
 					left join validator_attestation_streaks vas on 
 						vas.validatorindex = b1.validatorindex 
 						and vas.status = b1.status
 						and vas.start+vas.length = $1-1
+					left join validator_attestation_streaks vasunmatched 
+						on vasunmatched.validatorindex = b1.validatorindex 
+						and vasunmatched.status != b1.status
+						and vasunmatched.start+vasunmatched.length = $1-1
 			),
 			-- consider validator-activation, extra-step for performance-reasons
 			fixedstreaks as (
